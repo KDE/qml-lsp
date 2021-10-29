@@ -233,6 +233,48 @@ func wordAtPos(str string, idx int) string {
 	return ""
 }
 
+func matches(node *sitter.Node, p lsp.Position) bool {
+	p.Character++
+	p.Line++
+	println(node.StartPoint().Row, p.Line, "&&", p.Line, node.EndPoint().Row)
+	if node.StartPoint().Row <= uint32(p.Line) && uint32(p.Line) <= node.EndPoint().Row {
+		if node.StartPoint().Row == node.EndPoint().Row {
+			if node.StartPoint().Column <= uint32(p.Character) && uint32(p.Character) <= node.EndPoint().Column {
+				println(fmt.Sprintln(node.Type(), node.StartPoint(), node.EndPoint(), p, "matches within line"))
+				return true
+			}
+		} else {
+			println(fmt.Sprintln(node.Type(), node.StartPoint(), node.EndPoint(), p, "matches because multiline"))
+			return true
+		}
+	}
+	println(fmt.Sprintln(node.Type(), node.StartPoint(), node.EndPoint(), p, "not matches"))
+	return false
+}
+
+func findNearestMatchingNode(n *sitter.Node, p lsp.Position) *sitter.Node {
+	println("looking at a node ", n.ChildCount(), n.Type())
+	for i := 0; i < int(n.ChildCount()); i++ {
+		child := n.Child(i)
+
+		println("matching", child.String())
+
+		if matches(child, p) {
+			return findNearestMatchingNode(child, p)
+		}
+	}
+
+	return n
+}
+
+func parentTypes(n *sitter.Node) []string {
+	if n.Parent() == nil {
+		return []string{n.Type()}
+	} else {
+		return append([]string{n.Type()}, parentTypes(n.Parent())...)
+	}
+}
+
 func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams) (*lsp.CompletionList, error) {
 	uri := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
 	document := s.files[uri]
@@ -244,7 +286,6 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	}
 
 	w := wordAtPos(document, idx)
-	println(w)
 
 	citems := []lsp.CompletionItem{}
 
@@ -252,7 +293,6 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 		for _, component := range components {
 			for _, enum := range component.Enums {
 				for mem := range enum.Values {
-					println(prefix+component.Name+"."+mem, w)
 					if strings.HasPrefix(prefix+component.Name+"."+mem, w) {
 						citems = append(citems, lsp.CompletionItem{
 							Label:  prefix + component.Name + "." + mem,
