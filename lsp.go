@@ -3,27 +3,65 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"strings"
 	"unicode"
 
+	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
+type filecontextimportdata struct {
+	Module *Module
+	As     string
+}
+
 type filecontext struct {
-	modules []Module
+	imports []filecontextimportdata
+	tree    *sitter.Tree
+}
+
+type importName struct {
+	path string
+	vmaj int
+	vmin int
+}
+
+type resultSting struct {
+	s string
+	e error
+}
+
+type resultModule struct {
+	m *Module
+	e error
+}
+
+func fromRaw(s []string, vmaj, vmin int) importName {
+	return importName{strings.Join(s, "."), vmaj, vmin}
 }
 
 type server struct {
 	rootURI      string
 	files        map[string]string
 	filecontexts map[string]filecontext
+
+	importNamesToResolvedPaths map[importName]resultSting
+	resolvedPathsToModules     map[string]resultModule
+
+	builtinModule Module
 }
 
 func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.InitializeParams) (*lsp.InitializeResult, *lsp.InitializeError) {
 	s.rootURI = string(params.RootURI)
 	s.files = map[string]string{}
 	s.filecontexts = map[string]filecontext{}
+
+	s.importNamesToResolvedPaths = map[importName]resultSting{}
+	s.resolvedPathsToModules = map[string]resultModule{}
+
+	s.builtinModule = builtinM
 
 	return &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
@@ -59,12 +97,77 @@ func init() {
 	}
 }
 
+func (s *server) getModule(uri []string, vmaj, vmin int) (*Module, error) {
+	imported := fromRaw(uri, vmaj, vmin)
+
+	var (
+		resolved string
+		err      error
+		module   Module
+	)
+
+	if v, ok := s.importNamesToResolvedPaths[imported]; ok {
+		if v.e != nil {
+			return nil, fmt.Errorf("failed to get module: %+w", v.e)
+		}
+
+		if vv, ok := s.resolvedPathsToModules[v.s]; ok {
+			if vv.e != nil {
+				return nil, fmt.Errorf("failed to get module: %+w", vv.e)
+			}
+
+			return vv.m, nil
+		} else {
+			goto resolvedToModule
+		}
+	} else {
+		goto importNameToResolved
+	}
+
+importNameToResolved:
+	resolved, err = actualQmlPath(uri, vmaj, vmin)
+	s.importNamesToResolvedPaths[imported] = resultSting{resolved, err}
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve import to file: %+w", err)
+	}
+
+resolvedToModule:
+	module, err = loadPluginTypes(resolved)
+	s.resolvedPathsToModules[resolved] = resultModule{&module, err}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load module types: %+w", err)
+	}
+
+	return &module, nil
+}
+
 func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.DocumentURI, content string) {
 	diags := lsp.PublishDiagnosticsParams{
 		URI: uri,
 	}
 
-	s.filecontexts[strings.TrimPrefix(string(uri), s.rootURI)] = filecontext{modules: []Module{builtinM}}
+	fileURI := strings.TrimPrefix(string(uri), s.rootURI)
+	cont := []byte(s.files[fileURI])
+
+	fctx := filecontext{}
+
+	it := qmlParser()
+	fctx.tree = it.Parse(nil, cont)
+
+	importData := extractImports(fctx.tree.RootNode(), cont)
+	for _, it := range importData {
+		m, err := s.getModule(it.Module, it.MajVersion, it.MinVersion)
+		if err != nil {
+			println(err.Error())
+			continue
+		}
+		fctx.imports = append(fctx.imports, filecontextimportdata{
+			Module: m,
+			As:     it.As,
+		})
+	}
+
+	s.filecontexts[fileURI] = fctx
 
 	conn.Notify(ctx, "textDocument/publishDiagnostics", diags)
 }
@@ -145,19 +248,30 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 
 	citems := []lsp.CompletionItem{}
 
-	for _, it := range fcontext.modules {
-		for _, component := range it.Components {
+	doComponents := func(prefix string, components []Component) {
+		for _, component := range components {
 			for _, enum := range component.Enums {
 				for mem := range enum.Values {
-					if strings.HasPrefix(component.Name+"."+mem, w) {
+					println(prefix+component.Name+"."+mem, w)
+					if strings.HasPrefix(prefix+component.Name+"."+mem, w) {
 						citems = append(citems, lsp.CompletionItem{
-							Label:  component.Name + "." + mem,
+							Label:  prefix + component.Name + "." + mem,
 							Kind:   lsp.CIKEnumMember,
-							Detail: component.Name + "." + enum.Name,
+							Detail: prefix + component.Name + "." + enum.Name,
 						})
 					}
 				}
 			}
+		}
+	}
+
+	doComponents("", s.builtinModule.Components)
+
+	for _, module := range fcontext.imports {
+		if module.As == "" {
+			doComponents("", module.Module.Components)
+		} else {
+			doComponents(module.As+".", module.Module.Components)
 		}
 	}
 
