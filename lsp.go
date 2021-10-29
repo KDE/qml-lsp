@@ -236,28 +236,21 @@ func wordAtPos(str string, idx int) string {
 func matches(node *sitter.Node, p lsp.Position) bool {
 	p.Character++
 	p.Line++
-	println(node.StartPoint().Row, p.Line, "&&", p.Line, node.EndPoint().Row)
 	if node.StartPoint().Row <= uint32(p.Line) && uint32(p.Line) <= node.EndPoint().Row {
 		if node.StartPoint().Row == node.EndPoint().Row {
 			if node.StartPoint().Column <= uint32(p.Character) && uint32(p.Character) <= node.EndPoint().Column {
-				println(fmt.Sprintln(node.Type(), node.StartPoint(), node.EndPoint(), p, "matches within line"))
 				return true
 			}
 		} else {
-			println(fmt.Sprintln(node.Type(), node.StartPoint(), node.EndPoint(), p, "matches because multiline"))
 			return true
 		}
 	}
-	println(fmt.Sprintln(node.Type(), node.StartPoint(), node.EndPoint(), p, "not matches"))
 	return false
 }
 
 func findNearestMatchingNode(n *sitter.Node, p lsp.Position) *sitter.Node {
-	println("looking at a node ", n.ChildCount(), n.Type())
 	for i := 0; i < int(n.ChildCount()); i++ {
 		child := n.Child(i)
-
-		println("matching", child.String())
 
 		if matches(child, p) {
 			return findNearestMatchingNode(child, p)
@@ -275,6 +268,18 @@ func parentTypes(n *sitter.Node) []string {
 	}
 }
 
+func locateEnclosingComponent(n *sitter.Node, b []byte) string {
+	if n.Parent() == nil {
+		return ""
+	}
+
+	if n.Type() == "object_declaration" {
+		return strings.Join(extractQualifiedIdentifier(n.Child(0), b), ".")
+	}
+
+	return locateEnclosingComponent(n.Parent(), b)
+}
+
 func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams) (*lsp.CompletionList, error) {
 	uri := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
 	document := s.files[uri]
@@ -286,18 +291,34 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	}
 
 	w := wordAtPos(document, idx)
+	m := findNearestMatchingNode(fcontext.tree.RootNode(), params.Position)
+	enclosing := locateEnclosingComponent(m, []byte(document))
 
 	citems := []lsp.CompletionItem{}
 
 	doComponents := func(prefix string, components []Component) {
 		for _, component := range components {
+			component.Name = saneify(component.Name)
+			if prefix+component.Name == enclosing {
+				for _, prop := range component.Properties {
+					if strings.HasPrefix(prop.Name, w) {
+						citems = append(citems, lsp.CompletionItem{
+							Label:      prop.Name,
+							Kind:       lsp.CIKProperty,
+							Detail:     prop.Type,
+							InsertText: strings.TrimPrefix(prop.Name, w),
+						})
+					}
+				}
+			}
 			for _, enum := range component.Enums {
 				for mem := range enum.Values {
 					if strings.HasPrefix(prefix+component.Name+"."+mem, w) {
 						citems = append(citems, lsp.CompletionItem{
-							Label:  prefix + component.Name + "." + mem,
-							Kind:   lsp.CIKEnumMember,
-							Detail: prefix + component.Name + "." + enum.Name,
+							Label:      prefix + component.Name + "." + mem,
+							Kind:       lsp.CIKEnumMember,
+							Detail:     prefix + component.Name + "." + enum.Name,
+							InsertText: strings.TrimPrefix(prefix+component.Name+"."+mem, w),
 						})
 					}
 				}
