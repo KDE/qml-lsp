@@ -1,7 +1,6 @@
 package libpaths
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -40,8 +39,6 @@ func Paths() []string {
 	if err != nil {
 		panic("failed to get qt: " + err.Error())
 	}
-
-	fmt.Println(append(env, qt))
 
 	return append(env, qt)
 }
