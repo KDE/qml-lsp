@@ -299,6 +299,13 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	doComponents := func(prefix string, components []Component) {
 		for _, component := range components {
 			component.Name = saneify(component.Name)
+			if strings.HasPrefix(prefix+component.Name, w) {
+				citems = append(citems, lsp.CompletionItem{
+					Label:      prefix + component.Name,
+					Kind:       lsp.CIKClass,
+					InsertText: strings.TrimPrefix(prefix+component.Name, w),
+				})
+			}
 			if prefix+component.Name == enclosing {
 				for _, prop := range component.Properties {
 					if strings.HasPrefix(prop.Name, w) {
