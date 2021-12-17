@@ -4,6 +4,8 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"log"
+	qml "qml-lsp/treesitter-qml"
 	"strings"
 	"unicode"
 
@@ -15,6 +17,7 @@ import (
 type filecontextimportdata struct {
 	Module *Module
 	As     string
+	Range  PointRange
 }
 
 type filecontext struct {
@@ -42,6 +45,29 @@ func fromRaw(s []string, vmaj, vmin int) importName {
 	return importName{strings.Join(s, "."), vmaj, vmin}
 }
 
+type queries struct {
+	propertyTypes          *sitter.Query
+	objectDeclarationTypes *sitter.Query
+	withStatements         *sitter.Query
+}
+
+func (q *queries) init() error {
+	var err error
+	q.propertyTypes, err = sitter.NewQuery([]byte("(property_declarator (property_type) @ident)"), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.objectDeclarationTypes, err = sitter.NewQuery([]byte("(object_declaration (qualified_identifier) @ident)"), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.withStatements, err = sitter.NewQuery([]byte(`(with_statement "with" @bad)`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 type server struct {
 	rootURI      string
 	files        map[string]string
@@ -51,6 +77,8 @@ type server struct {
 	resolvedPathsToModules     map[string]resultModule
 
 	builtinModule Module
+
+	q queries
 }
 
 func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.InitializeParams) (*lsp.InitializeResult, *lsp.InitializeError) {
@@ -62,6 +90,12 @@ func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	s.resolvedPathsToModules = map[string]resultModule{}
 
 	s.builtinModule = builtinM
+
+	err := s.q.init()
+	if err != nil {
+		log.Printf("error initting queries: %s", err)
+		return nil, &lsp.InitializeError{Retry: false}
+	}
 
 	return &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
@@ -141,6 +175,108 @@ resolvedToModule:
 	return &module, nil
 }
 
+func (s *server) lintUnusedImports(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	fctx := s.filecontexts[fileURI]
+	data := []byte(s.files[fileURI])
+	imports := fctx.imports
+	used := make([]bool, len(imports))
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	types := map[string]struct{}{}
+
+	// gather all the refernces to types in the documents
+
+	// uses in property declarations, such as
+	// property -> Kirigami.AboutPage <- aboutPage: ...
+	qc.Exec(s.q.propertyTypes, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			types[cap.Node.Content(data)] = struct{}{}
+		}
+	}
+
+	// uses in object blocks, such as
+	// -> Kirigami.AboutPage <- { }
+	qc.Exec(s.q.objectDeclarationTypes, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			types[cap.Node.Content(data)] = struct{}{}
+		}
+	}
+
+	// we've gathered all our types, now we try to match them to imports
+outerLoop:
+	for kind := range types {
+		for idx := range imports {
+			importData := imports[idx]
+			isUsed := used[idx]
+
+			// if this import is already known used, we don't need to waste time
+			// checking if it's used again
+			if isUsed {
+				continue
+			}
+
+			// handle stuff like "import org.kde.kirigami 2.10 as Kirigami"
+			// Kirigami.AboutData vs AboutData.
+			prefix := ""
+			if importData.As != "" {
+				prefix = importData.As + "."
+			}
+
+			for _, component := range importData.Module.Components {
+				if prefix+saneify(component.Name) == kind {
+					used[idx] = true
+					continue outerLoop
+				}
+			}
+		}
+	}
+
+	// now let's go through our imports and raise warnings for any unused imports
+	for idx, importData := range imports {
+		isUsed := used[idx]
+
+		if isUsed {
+			continue
+		}
+
+		// oops, this import isn't used! let's raise a diagnostic...
+		diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+			Range:    importData.Range.ToLSP(),
+			Severity: lsp.Warning,
+			Source:   "import lint",
+			Message:  "Unused import",
+		})
+	}
+}
+
+func (s *server) lintWith(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	fctx := s.filecontexts[fileURI]
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	qc.Exec(s.q.withStatements, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+				Range:    FromNode(cap.Node).ToLSP(),
+				Severity: lsp.Warning,
+				Source:   "with lint",
+				Message:  "Don't use with statements in modern JavaScript",
+			})
+		}
+	}
+}
+
+func (s *server) doLints(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	s.lintUnusedImports(ctx, fileURI, diags)
+	s.lintWith(ctx, fileURI, diags)
+}
+
 func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.DocumentURI, content string) {
 	diags := lsp.PublishDiagnosticsParams{
 		URI: uri,
@@ -164,10 +300,13 @@ func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.D
 		fctx.imports = append(fctx.imports, filecontextimportdata{
 			Module: m,
 			As:     it.As,
+			Range:  it.Range,
 		})
 	}
 
 	s.filecontexts[fileURI] = fctx
+
+	s.doLints(ctx, fileURI, &diags)
 
 	conn.Notify(ctx, "textDocument/publishDiagnostics", diags)
 }

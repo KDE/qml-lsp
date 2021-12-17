@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
+	"github.com/sourcegraph/go-lsp"
 )
 
 func extractQualifiedIdentifier(node *sitter.Node, b []byte) []string {
@@ -43,6 +44,7 @@ func extractImports(root *sitter.Node, b []byte) []importData {
 				Module:     extractQualifiedIdentifier(child.Child(1), b),
 				MajVersion: maj,
 				MinVersion: min,
+				Range:      FromNode(child),
 			})
 		case 4:
 			maj, min := extractVersionNumber(child.Child(2), b)
@@ -51,6 +53,7 @@ func extractImports(root *sitter.Node, b []byte) []importData {
 				MajVersion: maj,
 				MinVersion: min,
 				As:         child.Child(3).Child(1).Content(b),
+				Range:      FromNode(child),
 			})
 		}
 	}
@@ -62,6 +65,27 @@ type importData struct {
 	MajVersion int
 	MinVersion int
 	As         string
+
+	// we use this to lint for unused imports
+	Range PointRange
+}
+
+type PointRange struct {
+	StartPoint sitter.Point
+	EndPoint   sitter.Point
+}
+
+func FromNode(n *sitter.Node) PointRange {
+	return PointRange{
+		StartPoint: n.StartPoint(),
+		EndPoint:   n.EndPoint(),
+	}
+}
+
+func (p PointRange) ToLSP() lsp.Range {
+	return lsp.Range{
+		Start: lsp.Position{Line: int(p.StartPoint.Row), Character: int(p.StartPoint.Column)},
+		End:   lsp.Position{Line: int(p.EndPoint.Row), Character: int(p.EndPoint.Column)}}
 }
 
 func (i *importData) moduleString() string {
