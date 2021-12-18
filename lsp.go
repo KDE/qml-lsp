@@ -307,24 +307,24 @@ func (s *server) lintAlias(ctx context.Context, fileURI string, diags *lsp.Publi
 }
 
 var anchorsInLayoutWarnings = map[string]string{
-	"anchors.alignWhenCentered":      `Don't use anchors.alignWhenCentered in a Layout. Layouts always pixel-align their items, so tihs is unneccesary.`,
-	"anchors.baseline":               `Don't use anchors.baseline in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignBaseline"`,
-	"anchors.baselineOffset":         `Don't use anchors.baselineOffset in a Layout. Instead, consider setting the "{{pfx}}Layout.bottomMargin".`,
-	"anchors.bottom":                 `Don't use anchors.bottom in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignBottom"`,
-	"anchors.bottomMargin":           `Don't use anchors.bottomMargin in a Layout. Instead, consider setting the "{{pfx}}Layout.bottomMargin"`,
-	"anchors.centerIn":               `Don't use anchors.centerIn in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter"`,
-	"anchors.fill":                   `Don't use anchors.fill in a Layout. Instead, consider using "{{pfx}}Layout.fillWidth: true" and "{{pfx}}Layout.fillHeight: true"`,
-	"anchors.horizontalCenter":       `Don't use anchors.horizontalCenter in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignHCenter"`,
-	"anchors.horizontalCenterOffset": `Don't use anchors.horizontalCenterOffset in a Layout. Instead, consider using "{{pfx}}Layout.leftMargin" or "{{pfx}}Layout.rightMargin"`,
-	"anchors.left":                   `Don't use anchors.left in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignLeft"`,
-	"anchors.leftMargin":             `Don't use anchors.leftMargin in a Layout. Instead, consider using "{{pfx}}Layout.leftMargin"`,
-	"anchors.margins":                `Don't use anchors.margins in a Layout. Instead, consider using "{{pfx}}Layout.margins"`,
-	"anchors.right":                  `Don't use anchors.right in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignRight"`,
-	"anchors.rightMargin":            `Don't use anchors.rightMargin in a Layout. Instead, consider using "{{pfx}}Layout.rightMargin"`,
-	"anchors.top":                    `Don't use anchors.top in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignTop"`,
-	"anchors.topMargin":              `Don't use anchors.topMargin in a Layout. Instead, consider using "{{pfx}}Layout.topMargin"`,
-	"anchors.verticalCenter":         `Don't use anchors.verticalCenter in a Layout. Instead, consider using "{{pfx}}Layout.horizontalAlignment: Qt.AlignHCenter"`,
-	"anchors.verticalCenterOffset":   `Don't use anchors.verticalCenterOffset in a Layout. Instead, consider using "{{pfx}}Layout.topMargin" or "{{pfx}}Layout.bottomMargin"`,
+	"anchors.alignWhenCentered":      `Don't use anchors.alignWhenCentered in a {{kind}}. Layouts always pixel-align their items, so tihs is unneccesary.`,
+	"anchors.baseline":               `Don't use anchors.baseline in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignBaseline"`,
+	"anchors.baselineOffset":         `Don't use anchors.baselineOffset in a {{kind}}. Instead, consider setting the "{{pfx}}Layout.bottomMargin".`,
+	"anchors.bottom":                 `Don't use anchors.bottom in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignBottom"`,
+	"anchors.bottomMargin":           `Don't use anchors.bottomMargin in a {{kind}}. Instead, consider setting the "{{pfx}}Layout.bottomMargin"`,
+	"anchors.centerIn":               `Don't use anchors.centerIn in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter"`,
+	"anchors.fill":                   `Don't use anchors.fill in a {{kind}}. Instead, consider using "{{pfx}}Layout.fillWidth: true" and "{{pfx}}Layout.fillHeight: true"`,
+	"anchors.horizontalCenter":       `Don't use anchors.horizontalCenter in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignHCenter"`,
+	"anchors.horizontalCenterOffset": `Don't use anchors.horizontalCenterOffset in a {{kind}}. Instead, consider using "{{pfx}}Layout.leftMargin" or "{{pfx}}Layout.rightMargin"`,
+	"anchors.left":                   `Don't use anchors.left in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignLeft"`,
+	"anchors.leftMargin":             `Don't use anchors.leftMargin in a {{kind}}. Instead, consider using "{{pfx}}Layout.leftMargin"`,
+	"anchors.margins":                `Don't use anchors.margins in a {{kind}}. Instead, consider using "{{pfx}}Layout.margins"`,
+	"anchors.right":                  `Don't use anchors.right in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignRight"`,
+	"anchors.rightMargin":            `Don't use anchors.rightMargin in a {{kind}}. Instead, consider using "{{pfx}}Layout.rightMargin"`,
+	"anchors.top":                    `Don't use anchors.top in a {{kind}}. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignTop"`,
+	"anchors.topMargin":              `Don't use anchors.topMargin in a {{kind}}. Instead, consider using "{{pfx}}Layout.topMargin"`,
+	"anchors.verticalCenter":         `Don't use anchors.verticalCenter in a {{kind}}. Instead, consider using "{{pfx}}Layout.horizontalAlignment: Qt.AlignHCenter"`,
+	"anchors.verticalCenterOffset":   `Don't use anchors.verticalCenterOffset in a {{kind}}. Instead, consider using "{{pfx}}Layout.topMargin" or "{{pfx}}Layout.bottomMargin"`,
 }
 
 func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
@@ -368,7 +368,7 @@ func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *l
 					Range:    FromNode(match.Captures[1].Node).ToLSP(),
 					Severity: lsp.Error,
 					Source:   "anchors in layouts lint",
-					Message:  strings.ReplaceAll(v, "{{pfx}}", pfx),
+					Message:  strings.ReplaceAll(strings.ReplaceAll(v, "{{kind}}", pfx+saneify(comp.ActualName)), "{{pfx}}", pfx),
 				})
 			}
 		}
@@ -540,6 +540,7 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	enclosing := locateEnclosingComponent(m, []byte(document))
 
 	citems := []lsp.CompletionItem{}
+	println(w)
 
 	doComponents := func(prefix string, components []Component) {
 		for _, component := range components {
@@ -573,6 +574,29 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 							InsertText: strings.TrimPrefix(prefix+component.ActualName+"."+mem, w),
 						})
 					}
+				}
+			}
+			if component.AttachedType == "" {
+				continue
+			}
+			for _, comp := range components {
+				if comp.Name != component.AttachedType {
+					continue
+				}
+
+				for _, prop := range comp.Properties {
+					fullName := prefix + saneify(component.ActualName) + "." + prop.Name
+					println(fullName, w)
+					if !strings.HasPrefix(fullName, w) {
+						continue
+					}
+
+					citems = append(citems, lsp.CompletionItem{
+						Label:      fullName,
+						Kind:       lsp.CIKProperty,
+						Detail:     fmt.Sprintf("attached %s", prefix+saneify(component.ActualName)),
+						InsertText: strings.TrimPrefix(fullName+": ", w),
+					})
 				}
 			}
 		}

@@ -20,7 +20,8 @@ type Component struct {
 	Name       string `qml:"name"`
 	ActualName string
 
-	Exports []string `qml:"exports"`
+	AttachedType string   `qml:"attachedType"`
+	Exports      []string `qml:"exports"`
 
 	Enums      []Enum     `qml:"@Enum"`
 	Properties []Property `qml:"@Property"`
