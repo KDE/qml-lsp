@@ -15,6 +15,7 @@ import (
 )
 
 type filecontextimportdata struct {
+	URI    importName
 	Module *Module
 	As     string
 	Range  PointRange
@@ -46,9 +47,10 @@ func fromRaw(s []string, vmaj, vmin int) importName {
 }
 
 type queries struct {
-	propertyTypes          *sitter.Query
-	objectDeclarationTypes *sitter.Query
-	withStatements         *sitter.Query
+	propertyTypes                 *sitter.Query
+	objectDeclarationTypes        *sitter.Query
+	withStatements                *sitter.Query
+	parentObjectChildPropertySets *sitter.Query
 }
 
 func (q *queries) init() error {
@@ -62,6 +64,15 @@ func (q *queries) init() error {
 		return err
 	}
 	q.withStatements, err = sitter.NewQuery([]byte(`(with_statement "with" @bad)`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.parentObjectChildPropertySets, err = sitter.NewQuery([]byte(`(object_declaration
+		(qualified_identifier) @outer
+		(object_block
+			(object_declaration
+				(object_block
+					(property_set (qualified_identifier) @prop)))))`), qml.GetLanguage())
 	if err != nil {
 		return err
 	}
@@ -227,7 +238,7 @@ outerLoop:
 			}
 
 			for _, component := range importData.Module.Components {
-				if prefix+saneify(component.Name) == kind {
+				if prefix+saneify(component.ActualName) == kind {
 					used[idx] = true
 					continue outerLoop
 				}
@@ -272,9 +283,103 @@ func (s *server) lintWith(ctx context.Context, fileURI string, diags *lsp.Publis
 	}
 }
 
+func (s *server) lintAlias(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	fctx := s.filecontexts[fileURI]
+	data := []byte(s.files[fileURI])
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	qc.Exec(s.q.propertyTypes, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			if cap.Node.Content(data) != "alias" {
+				continue
+			}
+			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+				Range:    FromNode(cap.Node).ToLSP(),
+				Severity: lsp.Warning,
+				Source:   "alias lint",
+				Message:  "Don't use property alias. Instead, consider binding the aliased property to a property of the concrete type on this type.",
+			})
+		}
+	}
+}
+
+var anchorsInLayoutWarnings = map[string]string{
+	"anchors.alignWhenCentered":      `Don't use anchors.alignWhenCentered in a Layout. Layouts always pixel-align their items, so tihs is unneccesary.`,
+	"anchors.baseline":               `Don't use anchors.baseline in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignBaseline"`,
+	"anchors.baselineOffset":         `Don't use anchors.baselineOffset in a Layout. Instead, consider setting the "{{pfx}}Layout.bottomMargin".`,
+	"anchors.bottom":                 `Don't use anchors.bottom in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignBottom"`,
+	"anchors.bottomMargin":           `Don't use anchors.bottomMargin in a Layout. Instead, consider setting the "{{pfx}}Layout.bottomMargin"`,
+	"anchors.centerIn":               `Don't use anchors.centerIn in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignVCenter | Qt.AlignHCenter"`,
+	"anchors.fill":                   `Don't use anchors.fill in a Layout. Instead, consider using "{{pfx}}Layout.fillWidth: true" and "{{pfx}}Layout.fillHeight: true"`,
+	"anchors.horizontalCenter":       `Don't use anchors.horizontalCenter in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignHCenter"`,
+	"anchors.horizontalCenterOffset": `Don't use anchors.horizontalCenterOffset in a Layout. Instead, consider using "{{pfx}}Layout.leftMargin" or "{{pfx}}Layout.rightMargin"`,
+	"anchors.left":                   `Don't use anchors.left in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignLeft"`,
+	"anchors.leftMargin":             `Don't use anchors.leftMargin in a Layout. Instead, consider using "{{pfx}}Layout.leftMargin"`,
+	"anchors.margins":                `Don't use anchors.margins in a Layout. Instead, consider using "{{pfx}}Layout.margins"`,
+	"anchors.right":                  `Don't use anchors.right in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignRight"`,
+	"anchors.rightMargin":            `Don't use anchors.rightMargin in a Layout. Instead, consider using "{{pfx}}Layout.rightMargin"`,
+	"anchors.top":                    `Don't use anchors.top in a Layout. Instead, consider using "{{pfx}}Layout.alignment: Qt.AlignTop"`,
+	"anchors.topMargin":              `Don't use anchors.topMargin in a Layout. Instead, consider using "{{pfx}}Layout.topMargin"`,
+	"anchors.verticalCenter":         `Don't use anchors.verticalCenter in a Layout. Instead, consider using "{{pfx}}Layout.horizontalAlignment: Qt.AlignHCenter"`,
+	"anchors.verticalCenterOffset":   `Don't use anchors.verticalCenterOffset in a Layout. Instead, consider using "{{pfx}}Layout.topMargin" or "{{pfx}}Layout.bottomMargin"`,
+}
+
+func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	fctx := s.filecontexts[fileURI]
+	data := []byte(s.files[fileURI])
+	imports := fctx.imports
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	qc.Exec(s.q.parentObjectChildPropertySets, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		parentType := match.Captures[0].Node.Content(data)
+		childProperty := match.Captures[1].Node.Content(data)
+
+		if !strings.HasPrefix(childProperty, "anchors") {
+			continue
+		}
+
+		for _, item := range imports {
+			if item.URI.path != "QtQuick.Layouts" {
+				continue
+			}
+
+			pfx := ""
+			if item.As != "" {
+				pfx = item.As + "."
+			}
+
+			for _, comp := range item.Module.Components {
+				if pfx+saneify(comp.ActualName) != parentType {
+					continue
+				}
+
+				v, ok := anchorsInLayoutWarnings[childProperty]
+				if !ok {
+					continue
+				}
+
+				diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+					Range:    FromNode(match.Captures[1].Node).ToLSP(),
+					Severity: lsp.Error,
+					Source:   "anchors in layouts lint",
+					Message:  strings.ReplaceAll(v, "{{pfx}}", pfx),
+				})
+			}
+		}
+	}
+}
+
 func (s *server) doLints(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
 	s.lintUnusedImports(ctx, fileURI, diags)
+	s.lintAlias(ctx, fileURI, diags)
 	s.lintWith(ctx, fileURI, diags)
+	s.lintLayoutAnchors(ctx, fileURI, diags)
 }
 
 func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.DocumentURI, content string) {
@@ -299,6 +404,7 @@ func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.D
 		}
 		fctx.imports = append(fctx.imports, filecontextimportdata{
 			Module: m,
+			URI:    fromRaw(it.Module, it.MajVersion, it.MinVersion),
 			As:     it.As,
 			Range:  it.Range,
 		})
@@ -437,15 +543,15 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 
 	doComponents := func(prefix string, components []Component) {
 		for _, component := range components {
-			component.Name = saneify(component.Name)
-			if strings.HasPrefix(prefix+component.Name, w) {
+			component.ActualName = saneify(component.ActualName)
+			if strings.HasPrefix(prefix+component.ActualName, w) {
 				citems = append(citems, lsp.CompletionItem{
-					Label:      prefix + component.Name,
+					Label:      prefix + component.ActualName,
 					Kind:       lsp.CIKClass,
-					InsertText: strings.TrimPrefix(prefix+component.Name, w),
+					InsertText: strings.TrimPrefix(prefix+component.ActualName, w),
 				})
 			}
-			if prefix+component.Name == enclosing {
+			if prefix+component.ActualName == enclosing {
 				for _, prop := range component.Properties {
 					if strings.HasPrefix(prop.Name, w) {
 						citems = append(citems, lsp.CompletionItem{
@@ -459,12 +565,12 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 			}
 			for _, enum := range component.Enums {
 				for mem := range enum.Values {
-					if strings.HasPrefix(prefix+component.Name+"."+mem, w) {
+					if strings.HasPrefix(prefix+component.ActualName+"."+mem, w) {
 						citems = append(citems, lsp.CompletionItem{
-							Label:      prefix + component.Name + "." + mem,
+							Label:      prefix + component.ActualName + "." + mem,
 							Kind:       lsp.CIKEnumMember,
-							Detail:     prefix + component.Name + "." + enum.Name,
-							InsertText: strings.TrimPrefix(prefix+component.Name+"."+mem, w),
+							Detail:     prefix + component.ActualName + "." + enum.Name,
+							InsertText: strings.TrimPrefix(prefix+component.ActualName+"."+mem, w),
 						})
 					}
 				}

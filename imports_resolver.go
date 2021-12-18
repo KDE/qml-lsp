@@ -73,19 +73,24 @@ func loadPluginTypes(qmlPath string) (Module, error) {
 	typesPath := path.Join(qmlPath, "plugins.qmltypes")
 	data, err := ioutil.ReadFile(typesPath)
 	if err != nil {
-		return Module{}, fmt.Errorf("failed to read qmltypes file: %+w", err)
+		return Module{}, fmt.Errorf("failed to read qmltypes file at %s: %+w", typesPath, err)
 	}
 
 	var d QMLTypesFile
 	err = parser.ParseBytes(typesPath, data, &d)
 	if err != nil {
-		return Module{}, fmt.Errorf("failed to parse qmltypes file: %+w", err)
+		return Module{}, fmt.Errorf("failed to parse qmltypes file at %s: %+w", typesPath, err)
 	}
 
 	var m Module
 	err = unmarshal(Value{Object: &d.Main}, &m)
 	if err != nil {
-		return Module{}, fmt.Errorf("failed to unmarshal qmltypes file: %+w", err)
+		return Module{}, fmt.Errorf("failed to unmarshal qmltypes file at %s: %+w", typesPath, err)
+	}
+
+	for idx, cmp := range m.Components {
+		cmp.GetActualName()
+		m.Components[idx] = cmp
 	}
 
 	return m, nil
