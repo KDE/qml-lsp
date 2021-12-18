@@ -47,10 +47,12 @@ func fromRaw(s []string, vmaj, vmin int) importName {
 }
 
 type queries struct {
-	propertyTypes                 *sitter.Query
-	objectDeclarationTypes        *sitter.Query
-	withStatements                *sitter.Query
-	parentObjectChildPropertySets *sitter.Query
+	propertyTypes                           *sitter.Query
+	objectDeclarationTypes                  *sitter.Query
+	withStatements                          *sitter.Query
+	parentObjectChildPropertySets           *sitter.Query
+	statementBlocksWithVariableDeclarations *sitter.Query
+	variableAssignments                     *sitter.Query
 }
 
 func (q *queries) init() error {
@@ -73,6 +75,22 @@ func (q *queries) init() error {
 			(object_declaration
 				(object_block
 					(property_set (qualified_identifier) @prop)))))`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.statementBlocksWithVariableDeclarations, err = sitter.NewQuery([]byte(`
+	(statement_block
+		(variable_declaration
+			"var" @keyword
+			(variable_declarator name: (identifier) @name))
+		(_)* @following)
+`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.variableAssignments, err = sitter.NewQuery([]byte(`
+(assignment_expression left: (identifier) @ident)
+	`), qml.GetLanguage())
 	if err != nil {
 		return err
 	}
@@ -327,6 +345,55 @@ var anchorsInLayoutWarnings = map[string]string{
 	"anchors.verticalCenterOffset":   `Don't use anchors.verticalCenterOffset in a {{kind}}. Instead, consider using "{{pfx}}Layout.topMargin" or "{{pfx}}Layout.bottomMargin"`,
 }
 
+func (s *server) lintVar(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	fctx := s.filecontexts[fileURI]
+	data := []byte(s.files[fileURI])
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	ic := sitter.NewQueryCursor()
+	defer ic.Close()
+
+	qc.Exec(s.q.statementBlocksWithVariableDeclarations, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		vname := match.Captures[1].Node.Content(data)
+		keyword := match.Captures[0].Node
+		remaining := match.Captures[2:]
+
+		var isSet bool
+
+	outer:
+		for _, cap := range remaining {
+			ic.Exec(s.q.variableAssignments, cap.Node)
+			for imatch, igoNext := ic.NextMatch(); igoNext; imatch, igoNext = ic.NextMatch() {
+				iname := imatch.Captures[0].Node.Content(data)
+
+				if vname == iname {
+					isSet = true
+					break outer
+				}
+			}
+		}
+
+		if isSet {
+			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+				Range:    FromNode(keyword).ToLSP(),
+				Severity: lsp.Warning,
+				Source:   "var lint",
+				Message:  `Don't use var in modern JavaScript. Consider using "let" here instead.`,
+			})
+		} else {
+			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+				Range:    FromNode(keyword).ToLSP(),
+				Severity: lsp.Warning,
+				Source:   "var lint",
+				Message:  `Don't use var in modern JavaScript. Consider using "const" here instead.`,
+			})
+		}
+	}
+}
+
 func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
 	fctx := s.filecontexts[fileURI]
 	data := []byte(s.files[fileURI])
@@ -380,6 +447,7 @@ func (s *server) doLints(ctx context.Context, fileURI string, diags *lsp.Publish
 	s.lintAlias(ctx, fileURI, diags)
 	s.lintWith(ctx, fileURI, diags)
 	s.lintLayoutAnchors(ctx, fileURI, diags)
+	s.lintVar(ctx, fileURI, diags)
 }
 
 func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.DocumentURI, content string) {
