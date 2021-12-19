@@ -51,12 +51,13 @@ func zu(fn interface{}) func(ctx context.Context, conn jsonrpc2.JSONRPC2, params
 func StartServer() {
 	s := server{}
 	a := methodMap{
-		"initialize":              zu(s.Initialize),
-		"initialized":             zu(s.Initialized),
-		"textDocument/didOpen":    zu(s.DidOpen),
-		"textDocument/didChange":  zu(s.DidChange),
-		"textDocument/didClose":   zu(s.DidClose),
-		"textDocument/completion": zu(s.Completion),
+		"initialize":                      zu(s.Initialize),
+		"initialized":                     zu(s.Initialized),
+		"textDocument/didOpen":            zu(s.DidOpen),
+		"textDocument/didChange":          zu(s.DidChange),
+		"textDocument/didClose":           zu(s.DidClose),
+		"textDocument/completion":         zu(s.Completion),
+		"workspace/didChangeWatchedFiles": zu(s.DidChangeWatchedFiles),
 	}
 	han := jsonrpc2.HandlerWithError(func(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (result interface{}, err error) {
 		v, ok := a[req.Method]

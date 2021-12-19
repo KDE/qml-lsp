@@ -499,6 +499,10 @@ func (s *server) DidChange(ctx context.Context, conn jsonrpc2.JSONRPC2, params l
 	go s.evaluate(ctx, conn, params.TextDocument.URI, params.ContentChanges[0].Text)
 }
 
+func (s *server) DidChangeWatchedFiles(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.DidChangeWatchedFilesParams) {
+
+}
+
 func (s *server) DidClose(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.DidCloseTextDocumentParams) {
 	delete(s.files, strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI))
 	delete(s.filecontexts, strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI))
