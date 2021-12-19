@@ -53,6 +53,7 @@ type queries struct {
 	parentObjectChildPropertySets           *sitter.Query
 	statementBlocksWithVariableDeclarations *sitter.Query
 	variableAssignments                     *sitter.Query
+	doubleNegation                          *sitter.Query
 }
 
 func (q *queries) init() error {
@@ -90,6 +91,12 @@ func (q *queries) init() error {
 	}
 	q.variableAssignments, err = sitter.NewQuery([]byte(`
 (assignment_expression left: (identifier) @ident)
+	`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.doubleNegation, err = sitter.NewQuery([]byte(`
+(unary_expression operator: "!" argument: (unary_expression operator: "!" argument: (_) @arg)) @outer
 	`), qml.GetLanguage())
 	if err != nil {
 		return err
@@ -442,12 +449,31 @@ func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *l
 	}
 }
 
+func (s *server) lintDoubleNegation(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
+	fctx := s.filecontexts[fileURI]
+	data := []byte(s.files[fileURI])
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	qc.Exec(s.q.doubleNegation, fctx.tree.RootNode())
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
+			Range:    FromNode(match.Captures[0].Node).ToLSP(),
+			Severity: lsp.Info,
+			Source:   `double negation lint`,
+			Message:  fmt.Sprintf(`Many people find double negation hard to read. Consider using "Boolean(%s)" instead.`, match.Captures[1].Node.Content(data)),
+		})
+	}
+}
+
 func (s *server) doLints(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
 	s.lintUnusedImports(ctx, fileURI, diags)
 	s.lintAlias(ctx, fileURI, diags)
 	s.lintWith(ctx, fileURI, diags)
 	s.lintLayoutAnchors(ctx, fileURI, diags)
 	s.lintVar(ctx, fileURI, diags)
+	s.lintDoubleNegation(ctx, fileURI, diags)
 }
 
 func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.DocumentURI, content string) {
