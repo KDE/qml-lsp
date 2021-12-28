@@ -54,6 +54,10 @@ func potentialQmlPaths(parts, basePaths []string, vmaj, vmin int) []string {
 	return retPaths
 }
 
+var (
+	errQmlTypesNotFound = errors.New(".qmltypes not found in any of the potential paths")
+)
+
 func actualQmlPath(s []string, vmaj, vmin int) (string, error) {
 	potentialPaths := potentialQmlPaths(s, paths, vmaj, vmin)
 	for _, it := range potentialPaths {
@@ -66,18 +70,12 @@ func actualQmlPath(s []string, vmaj, vmin int) (string, error) {
 			return "", fmt.Errorf("failed to determine actual qml path: %+w", err)
 		}
 	}
-	return "", errors.New(".qmltypes not found in any of the potential paths")
+	return "", errQmlTypesNotFound
 }
 
-func loadPluginTypes(qmlPath string) (Module, error) {
-	typesPath := path.Join(qmlPath, "plugins.qmltypes")
-	data, err := ioutil.ReadFile(typesPath)
-	if err != nil {
-		return Module{}, fmt.Errorf("failed to read qmltypes file at %s: %+w", typesPath, err)
-	}
-
+func loadPluginTypes(typesPath string, data []byte) (Module, error) {
 	var d QMLTypesFile
-	err = parser.ParseBytes(typesPath, data, &d)
+	err := parser.ParseBytes(typesPath, data, &d)
 	if err != nil {
 		return Module{}, fmt.Errorf("failed to parse qmltypes file at %s: %+w", typesPath, err)
 	}
@@ -94,4 +92,14 @@ func loadPluginTypes(qmlPath string) (Module, error) {
 	}
 
 	return m, nil
+}
+
+func loadPluginTypesFile(qmlPath string) (Module, error) {
+	typesPath := path.Join(qmlPath, "plugins.qmltypes")
+	data, err := ioutil.ReadFile(typesPath)
+	if err != nil {
+		return Module{}, fmt.Errorf("failed to read qmltypes file at %s: %+w", typesPath, err)
+	}
+
+	return loadPluginTypes(typesPath, data)
 }

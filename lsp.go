@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log"
+	"os/exec"
 	qml "qml-lsp/treesitter-qml"
 	"strings"
 	"unicode"
@@ -167,8 +169,34 @@ func init() {
 	}
 }
 
+func qmlPluginDump(uri []string, vmaj, vmin int) (output []byte, err error) {
+	defer func() {
+		if err != nil {
+			log.Printf("failed to run qmlplugindump for %s %d.%d: %s", strings.Join(uri, "."), vmaj, vmin, err)
+		} else {
+			log.Printf("successfully ran qmlplugindump!\n%s", string(output))
+		}
+	}()
+	log.Printf("qmltypes for %s %d.%d not found, running qmlplugindump...", strings.Join(uri, "."), vmaj, vmin)
+
+	for _, it := range []string{"qmlplugindump", "qmlplugindump-qt5"} {
+		output, err = exec.Command(it, strings.Join(uri, "."), fmt.Sprintf("%d.%d", vmaj, vmin)).Output()
+		if err != nil {
+			continue
+		}
+		break
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return output, nil
+}
+
 func (s *server) getModule(uri []string, vmaj, vmin int) (*Module, error) {
 	imported := fromRaw(uri, vmaj, vmin)
+
+	display := fmt.Sprintf("%s %d.%d", strings.Join(uri, "."), vmaj, vmin)
 
 	var (
 		resolved string
@@ -178,12 +206,12 @@ func (s *server) getModule(uri []string, vmaj, vmin int) (*Module, error) {
 
 	if v, ok := s.importNamesToResolvedPaths[imported]; ok {
 		if v.e != nil {
-			return nil, fmt.Errorf("failed to get module: %+w", v.e)
+			return nil, fmt.Errorf("failed to get module %s: %+w", display, v.e)
 		}
 
 		if vv, ok := s.resolvedPathsToModules[v.s]; ok {
 			if vv.e != nil {
-				return nil, fmt.Errorf("failed to get module: %+w", vv.e)
+				return nil, fmt.Errorf("failed to get module %s: %+w", display, vv.e)
 			}
 
 			return vv.m, nil
@@ -198,11 +226,25 @@ importNameToResolved:
 	resolved, err = actualQmlPath(uri, vmaj, vmin)
 	s.importNamesToResolvedPaths[imported] = resultSting{resolved, err}
 	if err != nil {
+		if errors.Is(err, errQmlTypesNotFound) {
+			var inMem = fmt.Sprintf(`/\inmem:%s/\%d.%d`, strings.Join(uri, "."), vmaj, vmin)
+			data, err := qmlPluginDump(uri, vmaj, vmin)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve import to file, and qmlplugindump failed: %+w", err)
+			}
+			module, err = loadPluginTypes("inmemory", data)
+			s.resolvedPathsToModules[inMem] = resultModule{&module, err}
+			if err != nil {
+				return nil, fmt.Errorf("failed to load module types generated from qmlplugindump: %+w", err)
+			}
+			s.importNamesToResolvedPaths[imported] = resultSting{inMem, nil}
+			return &module, nil
+		}
 		return nil, fmt.Errorf("failed to resolve import to file: %+w", err)
 	}
 
 resolvedToModule:
-	module, err = loadPluginTypes(resolved)
+	module, err = loadPluginTypesFile(resolved)
 	s.resolvedPathsToModules[resolved] = resultModule{&module, err}
 	if err != nil {
 		return nil, fmt.Errorf("failed to load module types: %+w", err)
