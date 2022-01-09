@@ -132,7 +132,7 @@ func main() {
 		}
 	}
 
-	fmt.Printf("class %s : %s {\npublic:\n", resolveName(), className)
+	fmt.Printf("class %s : public %s {\npublic:\n", resolveName(), className)
 
 	// properties
 	{
