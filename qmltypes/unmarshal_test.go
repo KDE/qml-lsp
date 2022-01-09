@@ -1,6 +1,7 @@
-package main
+package qmltypes_test
 
 import (
+	"qml-lsp/qmltypes"
 	"reflect"
 	"testing"
 )
@@ -23,9 +24,9 @@ type mu struct {
 
 func TestUnmarshal(t *testing.T) {
 	boolean := false
-	val := Value{Boolean: str("true")}
+	val := qmltypes.Value{Boolean: str("true")}
 
-	err := unmarshal(val, &boolean)
+	err := qmltypes.Unmarshal(val, &boolean)
 	if err != nil {
 		t.Fatalf("failed to unmarshal: %s", err)
 	}
@@ -37,16 +38,16 @@ func TestUnmarshal(t *testing.T) {
 	var it struct {
 		M map[string]string `qml:"m"`
 	}
-	val = Value{Object: &Object{
+	val = qmltypes.Value{Object: &qmltypes.Object{
 		Name: "mald",
-		Items: []Item{
+		Items: []qmltypes.Item{
 			{
-				Field: &Field{
+				Field: &qmltypes.Field{
 					Field: "m",
-					Value: Value{Map: &Map{
-						Entries: []MapEntry{
-							{"hi", Value{String: str("mald")}},
-							{"ho", Value{String: str("mald")}},
+					Value: qmltypes.Value{Map: &qmltypes.Map{
+						Entries: []qmltypes.MapEntry{
+							{"hi", qmltypes.Value{String: str("mald")}},
+							{"ho", qmltypes.Value{String: str("mald")}},
 						},
 					}},
 				},
@@ -54,7 +55,7 @@ func TestUnmarshal(t *testing.T) {
 		},
 	}}
 
-	err = unmarshal(val, &it)
+	err = qmltypes.Unmarshal(val, &it)
 	if err != nil {
 		t.Fatalf("failed to unmarshal: %s", err)
 	}
@@ -63,13 +64,13 @@ func TestUnmarshal(t *testing.T) {
 	}
 
 	var arr []int
-	val = Value{List: &List{
-		Values: []Value{
+	val = qmltypes.Value{List: &qmltypes.List{
+		Values: []qmltypes.Value{
 			{Number: num(1)},
 			{Number: num(2)},
 		},
 	}}
-	err = unmarshal(val, &arr)
+	err = qmltypes.Unmarshal(val, &arr)
 	if err != nil {
 		t.Fatalf("failed to unmarshal: %s", err)
 	}
@@ -78,29 +79,29 @@ func TestUnmarshal(t *testing.T) {
 	}
 
 	var thonk mu
-	val = Value{Object: &Object{
-		Items: []Item{
+	val = qmltypes.Value{Object: &qmltypes.Object{
+		Items: []qmltypes.Item{
 			{
-				Object: &Object{
+				Object: &qmltypes.Object{
 					Name: "Hm",
-					Items: []Item{
+					Items: []qmltypes.Item{
 						{
-							Field: &Field{
+							Field: &qmltypes.Field{
 								Field: "comedy",
-								Value: Value{Number: num(1)},
+								Value: qmltypes.Value{Number: num(1)},
 							},
 						},
 					},
 				},
 			},
 			{
-				Object: &Object{
+				Object: &qmltypes.Object{
 					Name: "Hm",
-					Items: []Item{
+					Items: []qmltypes.Item{
 						{
-							Field: &Field{
+							Field: &qmltypes.Field{
 								Field: "comedy",
-								Value: Value{Number: num(2)},
+								Value: qmltypes.Value{Number: num(2)},
 							},
 						},
 					},
@@ -108,7 +109,7 @@ func TestUnmarshal(t *testing.T) {
 			},
 		},
 	}}
-	err = unmarshal(val, &thonk)
+	err = qmltypes.Unmarshal(val, &thonk)
 	if err != nil {
 		t.Fatalf("failed to unmarshal struct with children: %s", err)
 	}

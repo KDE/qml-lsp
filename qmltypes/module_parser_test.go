@@ -1,6 +1,8 @@
-package main
+package qmltypes_test
 
 import (
+	"qml-lsp/analysis"
+	"qml-lsp/qmltypes"
 	"testing"
 )
 
@@ -21,15 +23,15 @@ func TestUnmarshalLarge(t *testing.T) {
 		},
 	}
 	for _, it := range deps {
-		var document QMLTypesFile
+		var document qmltypes.QMLTypesFile
 
-		err := parser.ParseString(it.file, it.content, &document)
+		err := qmltypes.Parser.ParseString(it.file, it.content, &document)
 		if err != nil {
 			t.Fatalf("Failed to parse file %s: %s", it.file, err)
 		}
 
-		var modu Module
-		err = unmarshal(Value{Object: &document.Main}, &modu)
+		var modu analysis.Module
+		err = qmltypes.Unmarshal(qmltypes.Value{Object: &document.Main}, &modu)
 
 		if err != nil {
 			t.Fatalf("Failed to unmarshal file %s: %s", it.file, err)

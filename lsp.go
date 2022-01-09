@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"log"
-	"os/exec"
+	"qml-lsp/analysis"
+	"qml-lsp/qmltypes/qtquick"
 	qml "qml-lsp/treesitter-qml"
 	"strings"
 	"unicode"
@@ -15,38 +15,6 @@ import (
 	"github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
-
-type filecontextimportdata struct {
-	URI    importName
-	Module *Module
-	As     string
-	Range  PointRange
-}
-
-type filecontext struct {
-	imports []filecontextimportdata
-	tree    *sitter.Tree
-}
-
-type importName struct {
-	path string
-	vmaj int
-	vmin int
-}
-
-type resultSting struct {
-	s string
-	e error
-}
-
-type resultModule struct {
-	m *Module
-	e error
-}
-
-func fromRaw(s []string, vmaj, vmin int) importName {
-	return importName{strings.Join(s, "."), vmaj, vmin}
-}
 
 type queries struct {
 	propertyTypes                           *sitter.Query
@@ -107,27 +75,15 @@ func (q *queries) init() error {
 }
 
 type server struct {
-	rootURI      string
-	files        map[string]string
-	filecontexts map[string]filecontext
-
-	importNamesToResolvedPaths map[importName]resultSting
-	resolvedPathsToModules     map[string]resultModule
-
-	builtinModule Module
+	rootURI  string
+	analysis *analysis.AnalysisEngine
 
 	q queries
 }
 
 func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.InitializeParams) (*lsp.InitializeResult, *lsp.InitializeError) {
 	s.rootURI = string(params.RootURI)
-	s.files = map[string]string{}
-	s.filecontexts = map[string]filecontext{}
-
-	s.importNamesToResolvedPaths = map[importName]resultSting{}
-	s.resolvedPathsToModules = map[string]resultModule{}
-
-	s.builtinModule = builtinM
+	s.analysis = analysis.New(qtquick.BuiltinModule())
 
 	err := s.q.init()
 	if err != nil {
@@ -150,113 +106,10 @@ func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	}, nil
 }
 
-//go:embed test/builtins.qmltypes
-var builtin string
-
-var builtinM Module
-
-func init() {
-	var d QMLTypesFile
-
-	err := parser.ParseString("builtin", builtin, &d)
-	if err != nil {
-		panic(err)
-	}
-
-	err = unmarshal(Value{Object: &d.Main}, &builtinM)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func qmlPluginDump(uri []string, vmaj, vmin int) (output []byte, err error) {
-	defer func() {
-		if err != nil {
-			log.Printf("failed to run qmlplugindump for %s %d.%d: %s", strings.Join(uri, "."), vmaj, vmin, err)
-		} else {
-			log.Printf("successfully ran qmlplugindump!\n%s", string(output))
-		}
-	}()
-	log.Printf("qmltypes for %s %d.%d not found, running qmlplugindump...", strings.Join(uri, "."), vmaj, vmin)
-
-	for _, it := range []string{"qmlplugindump", "qmlplugindump-qt5"} {
-		output, err = exec.Command(it, strings.Join(uri, "."), fmt.Sprintf("%d.%d", vmaj, vmin)).Output()
-		if err != nil {
-			continue
-		}
-		break
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	return output, nil
-}
-
-func (s *server) getModule(uri []string, vmaj, vmin int) (*Module, error) {
-	imported := fromRaw(uri, vmaj, vmin)
-
-	display := fmt.Sprintf("%s %d.%d", strings.Join(uri, "."), vmaj, vmin)
-
-	var (
-		resolved string
-		err      error
-		module   Module
-	)
-
-	if v, ok := s.importNamesToResolvedPaths[imported]; ok {
-		if v.e != nil {
-			return nil, fmt.Errorf("failed to get module %s: %+w", display, v.e)
-		}
-
-		if vv, ok := s.resolvedPathsToModules[v.s]; ok {
-			if vv.e != nil {
-				return nil, fmt.Errorf("failed to get module %s: %+w", display, vv.e)
-			}
-
-			return vv.m, nil
-		} else {
-			goto resolvedToModule
-		}
-	} else {
-		goto importNameToResolved
-	}
-
-importNameToResolved:
-	resolved, err = actualQmlPath(uri, vmaj, vmin)
-	s.importNamesToResolvedPaths[imported] = resultSting{resolved, err}
-	if err != nil {
-		if errors.Is(err, errQmlTypesNotFound) {
-			var inMem = fmt.Sprintf(`/\inmem:%s/\%d.%d`, strings.Join(uri, "."), vmaj, vmin)
-			data, err := qmlPluginDump(uri, vmaj, vmin)
-			if err != nil {
-				return nil, fmt.Errorf("failed to resolve import to file, and qmlplugindump failed: %+w", err)
-			}
-			module, err = loadPluginTypes("inmemory", data)
-			s.resolvedPathsToModules[inMem] = resultModule{&module, err}
-			if err != nil {
-				return nil, fmt.Errorf("failed to load module types generated from qmlplugindump: %+w", err)
-			}
-			s.importNamesToResolvedPaths[imported] = resultSting{inMem, nil}
-			return &module, nil
-		}
-		return nil, fmt.Errorf("failed to resolve import to file: %+w", err)
-	}
-
-resolvedToModule:
-	module, err = loadPluginTypesFile(resolved)
-	s.resolvedPathsToModules[resolved] = resultModule{&module, err}
-	if err != nil {
-		return nil, fmt.Errorf("failed to load module types: %+w", err)
-	}
-
-	return &module, nil
-}
-
 func (s *server) lintUnusedImports(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	fctx := s.filecontexts[fileURI]
-	data := []byte(s.files[fileURI])
-	imports := fctx.imports
+	fctx, _ := s.analysis.GetFileContext(fileURI)
+	data := fctx.Body
+	imports := fctx.Imports
 	used := make([]bool, len(imports))
 
 	qc := sitter.NewQueryCursor()
@@ -268,7 +121,7 @@ func (s *server) lintUnusedImports(ctx context.Context, fileURI string, diags *l
 
 	// uses in property declarations, such as
 	// property -> Kirigami.AboutPage <- aboutPage: ...
-	qc.Exec(s.q.propertyTypes, fctx.tree.RootNode())
+	qc.Exec(s.q.propertyTypes, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		for _, cap := range match.Captures {
 			types[cap.Node.Content(data)] = struct{}{}
@@ -277,7 +130,7 @@ func (s *server) lintUnusedImports(ctx context.Context, fileURI string, diags *l
 
 	// uses in object blocks, such as
 	// -> Kirigami.AboutPage <- { }
-	qc.Exec(s.q.objectDeclarationTypes, fctx.tree.RootNode())
+	qc.Exec(s.q.objectDeclarationTypes, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		for _, cap := range match.Captures {
 			types[cap.Node.Content(data)] = struct{}{}
@@ -305,7 +158,7 @@ outerLoop:
 			}
 
 			for _, component := range importData.Module.Components {
-				if prefix+saneify(component.ActualName) == kind {
+				if prefix+component.SaneName() == kind {
 					used[idx] = true
 					continue outerLoop
 				}
@@ -332,16 +185,16 @@ outerLoop:
 }
 
 func (s *server) lintWith(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	fctx := s.filecontexts[fileURI]
+	fctx, _ := s.analysis.GetFileContext(fileURI)
 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	qc.Exec(s.q.withStatements, fctx.tree.RootNode())
+	qc.Exec(s.q.withStatements, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		for _, cap := range match.Captures {
 			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
-				Range:    FromNode(cap.Node).ToLSP(),
+				Range:    analysis.FromNode(cap.Node).ToLSP(),
 				Severity: lsp.Warning,
 				Source:   "with lint",
 				Message:  "Don't use with statements in modern JavaScript",
@@ -351,20 +204,20 @@ func (s *server) lintWith(ctx context.Context, fileURI string, diags *lsp.Publis
 }
 
 func (s *server) lintAlias(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	fctx := s.filecontexts[fileURI]
-	data := []byte(s.files[fileURI])
+	fctx, _ := s.analysis.GetFileContext(fileURI)
+	data := fctx.Body
 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	qc.Exec(s.q.propertyTypes, fctx.tree.RootNode())
+	qc.Exec(s.q.propertyTypes, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		for _, cap := range match.Captures {
 			if cap.Node.Content(data) != "alias" {
 				continue
 			}
 			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
-				Range:    FromNode(cap.Node).ToLSP(),
+				Range:    analysis.FromNode(cap.Node).ToLSP(),
 				Severity: lsp.Warning,
 				Source:   "alias lint",
 				Message:  "Don't use property alias. Instead, consider binding the aliased property to a property of the concrete type on this type.",
@@ -395,8 +248,8 @@ var anchorsInLayoutWarnings = map[string]string{
 }
 
 func (s *server) lintVar(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	fctx := s.filecontexts[fileURI]
-	data := []byte(s.files[fileURI])
+	fctx, _ := s.analysis.GetFileContext(fileURI)
+	data := fctx.Body
 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
@@ -404,7 +257,7 @@ func (s *server) lintVar(ctx context.Context, fileURI string, diags *lsp.Publish
 	ic := sitter.NewQueryCursor()
 	defer ic.Close()
 
-	qc.Exec(s.q.statementBlocksWithVariableDeclarations, fctx.tree.RootNode())
+	qc.Exec(s.q.statementBlocksWithVariableDeclarations, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		vname := match.Captures[1].Node.Content(data)
 		keyword := match.Captures[0].Node
@@ -427,14 +280,14 @@ func (s *server) lintVar(ctx context.Context, fileURI string, diags *lsp.Publish
 
 		if isSet {
 			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
-				Range:    FromNode(keyword).ToLSP(),
+				Range:    analysis.FromNode(keyword).ToLSP(),
 				Severity: lsp.Warning,
 				Source:   "var lint",
 				Message:  `Don't use var in modern JavaScript. Consider using "let" here instead.`,
 			})
 		} else {
 			diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
-				Range:    FromNode(keyword).ToLSP(),
+				Range:    analysis.FromNode(keyword).ToLSP(),
 				Severity: lsp.Warning,
 				Source:   "var lint",
 				Message:  `Don't use var in modern JavaScript. Consider using "const" here instead.`,
@@ -444,14 +297,14 @@ func (s *server) lintVar(ctx context.Context, fileURI string, diags *lsp.Publish
 }
 
 func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	fctx := s.filecontexts[fileURI]
-	data := []byte(s.files[fileURI])
-	imports := fctx.imports
+	fctx, _ := s.analysis.GetFileContext(fileURI)
+	data := fctx.Body
+	imports := fctx.Imports
 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	qc.Exec(s.q.parentObjectChildPropertySets, fctx.tree.RootNode())
+	qc.Exec(s.q.parentObjectChildPropertySets, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		parentType := match.Captures[0].Node.Content(data)
 		childProperty := match.Captures[1].Node.Content(data)
@@ -461,7 +314,7 @@ func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *l
 		}
 
 		for _, item := range imports {
-			if item.URI.path != "QtQuick.Layouts" {
+			if item.URI.Path != "QtQuick.Layouts" {
 				continue
 			}
 
@@ -471,7 +324,7 @@ func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *l
 			}
 
 			for _, comp := range item.Module.Components {
-				if pfx+saneify(comp.ActualName) != parentType {
+				if pfx+comp.SaneName() != parentType {
 					continue
 				}
 
@@ -481,10 +334,10 @@ func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *l
 				}
 
 				diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
-					Range:    FromNode(match.Captures[1].Node).ToLSP(),
+					Range:    analysis.FromNode(match.Captures[1].Node).ToLSP(),
 					Severity: lsp.Error,
 					Source:   "anchors in layouts lint",
-					Message:  strings.ReplaceAll(strings.ReplaceAll(v, "{{kind}}", pfx+saneify(comp.ActualName)), "{{pfx}}", pfx),
+					Message:  strings.ReplaceAll(strings.ReplaceAll(v, "{{kind}}", pfx+comp.SaneName()), "{{pfx}}", pfx),
 				})
 			}
 		}
@@ -492,16 +345,16 @@ func (s *server) lintLayoutAnchors(ctx context.Context, fileURI string, diags *l
 }
 
 func (s *server) lintDoubleNegation(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	fctx := s.filecontexts[fileURI]
-	data := []byte(s.files[fileURI])
+	fctx, _ := s.analysis.GetFileContext(fileURI)
+	data := fctx.Body
 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	qc.Exec(s.q.doubleNegation, fctx.tree.RootNode())
+	qc.Exec(s.q.doubleNegation, fctx.Tree.RootNode())
 	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
 		diags.Diagnostics = append(diags.Diagnostics, lsp.Diagnostic{
-			Range:    FromNode(match.Captures[0].Node).ToLSP(),
+			Range:    analysis.FromNode(match.Captures[0].Node).ToLSP(),
 			Severity: lsp.Info,
 			Source:   `double negation lint`,
 			Message:  fmt.Sprintf(`Many people find double negation hard to read. Consider using "Boolean(%s)" instead.`, match.Captures[1].Node.Content(data)),
@@ -524,29 +377,8 @@ func (s *server) evaluate(ctx context.Context, conn jsonrpc2.JSONRPC2, uri lsp.D
 	}
 
 	fileURI := strings.TrimPrefix(string(uri), s.rootURI)
-	cont := []byte(s.files[fileURI])
 
-	fctx := filecontext{}
-
-	it := qmlParser()
-	fctx.tree = it.Parse(nil, cont)
-
-	importData := extractImports(fctx.tree.RootNode(), cont)
-	for _, it := range importData {
-		m, err := s.getModule(it.Module, it.MajVersion, it.MinVersion)
-		if err != nil {
-			println(err.Error())
-			continue
-		}
-		fctx.imports = append(fctx.imports, filecontextimportdata{
-			Module: m,
-			URI:    fromRaw(it.Module, it.MajVersion, it.MinVersion),
-			As:     it.As,
-			Range:  it.Range,
-		})
-	}
-
-	s.filecontexts[fileURI] = fctx
+	s.analysis.SetFileContext(fileURI, []byte(content))
 
 	s.doLints(ctx, fileURI, &diags)
 
@@ -558,12 +390,10 @@ func (s *server) Initialized(ctx context.Context, conn jsonrpc2.JSONRPC2, params
 }
 
 func (s *server) DidOpen(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.DidOpenTextDocumentParams) {
-	s.files[strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)] = params.TextDocument.Text
 	go s.evaluate(ctx, conn, params.TextDocument.URI, params.TextDocument.Text)
 }
 
 func (s *server) DidChange(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.DidChangeTextDocumentParams) {
-	s.files[strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)] = params.ContentChanges[0].Text
 	go s.evaluate(ctx, conn, params.TextDocument.URI, params.ContentChanges[0].Text)
 }
 
@@ -572,8 +402,7 @@ func (s *server) DidChangeWatchedFiles(ctx context.Context, conn jsonrpc2.JSONRP
 }
 
 func (s *server) DidClose(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.DidCloseTextDocumentParams) {
-	delete(s.files, strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI))
-	delete(s.filecontexts, strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI))
+	s.analysis.DeleteFileContext(strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI))
 }
 
 func posToIdx(str string, pos lsp.Position) int {
@@ -645,21 +474,13 @@ func findNearestMatchingNode(n *sitter.Node, p lsp.Position) *sitter.Node {
 	return n
 }
 
-func parentTypes(n *sitter.Node) []string {
-	if n.Parent() == nil {
-		return []string{n.Type()}
-	} else {
-		return append([]string{n.Type()}, parentTypes(n.Parent())...)
-	}
-}
-
 func locateEnclosingComponent(n *sitter.Node, b []byte) string {
 	if n.Parent() == nil {
 		return ""
 	}
 
 	if n.Type() == "object_declaration" {
-		return strings.Join(extractQualifiedIdentifier(n.Child(0), b), ".")
+		return strings.Join(analysis.ExtractQualifiedIdentifier(n.Child(0), b), ".")
 	}
 
 	return locateEnclosingComponent(n.Parent(), b)
@@ -667,8 +488,8 @@ func locateEnclosingComponent(n *sitter.Node, b []byte) string {
 
 func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams) (*lsp.CompletionList, error) {
 	uri := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
-	document := s.files[uri]
-	fcontext := s.filecontexts[uri]
+	fctx, _ := s.analysis.GetFileContext(uri)
+	document := string(fctx.Body)
 
 	idx := posToIdx(document, params.Position)
 	if idx == -1 {
@@ -676,23 +497,22 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	}
 
 	w := wordAtPos(document, idx)
-	m := findNearestMatchingNode(fcontext.tree.RootNode(), params.Position)
+	m := findNearestMatchingNode(fctx.Tree.RootNode(), params.Position)
 	enclosing := locateEnclosingComponent(m, []byte(document))
 
 	citems := []lsp.CompletionItem{}
 	println(w)
 
-	doComponents := func(prefix string, components []Component) {
+	doComponents := func(prefix string, components []analysis.Component) {
 		for _, component := range components {
-			component.ActualName = saneify(component.ActualName)
-			if strings.HasPrefix(prefix+component.ActualName, w) {
+			if strings.HasPrefix(prefix+component.SaneName(), w) {
 				citems = append(citems, lsp.CompletionItem{
-					Label:      prefix + component.ActualName,
+					Label:      prefix + component.SaneName(),
 					Kind:       lsp.CIKClass,
-					InsertText: strings.TrimPrefix(prefix+component.ActualName, w),
+					InsertText: strings.TrimPrefix(prefix+component.SaneName(), w),
 				})
 			}
-			if prefix+component.ActualName == enclosing {
+			if prefix+component.SaneName() == enclosing {
 				for _, prop := range component.Properties {
 					if strings.HasPrefix(prop.Name, w) {
 						citems = append(citems, lsp.CompletionItem{
@@ -706,12 +526,12 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 			}
 			for _, enum := range component.Enums {
 				for mem := range enum.Values {
-					if strings.HasPrefix(prefix+component.ActualName+"."+mem, w) {
+					if strings.HasPrefix(prefix+component.SaneName()+"."+mem, w) {
 						citems = append(citems, lsp.CompletionItem{
-							Label:      prefix + component.ActualName + "." + mem,
+							Label:      prefix + component.SaneName() + "." + mem,
 							Kind:       lsp.CIKEnumMember,
-							Detail:     prefix + component.ActualName + "." + enum.Name,
-							InsertText: strings.TrimPrefix(prefix+component.ActualName+"."+mem, w),
+							Detail:     prefix + component.SaneName() + "." + enum.Name,
+							InsertText: strings.TrimPrefix(prefix+component.SaneName()+"."+mem, w),
 						})
 					}
 				}
@@ -725,7 +545,7 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 				}
 
 				for _, prop := range comp.Properties {
-					fullName := prefix + saneify(component.ActualName) + "." + prop.Name
+					fullName := prefix + component.SaneName() + "." + prop.Name
 					println(fullName, w)
 					if !strings.HasPrefix(fullName, w) {
 						continue
@@ -734,7 +554,7 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 					citems = append(citems, lsp.CompletionItem{
 						Label:      fullName,
 						Kind:       lsp.CIKProperty,
-						Detail:     fmt.Sprintf("attached %s", prefix+saneify(component.ActualName)),
+						Detail:     fmt.Sprintf("attached %s", prefix+component.SaneName()),
 						InsertText: strings.TrimPrefix(fullName+": ", w),
 					})
 				}
@@ -742,9 +562,9 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 		}
 	}
 
-	doComponents("", s.builtinModule.Components)
+	doComponents("", s.analysis.BuiltinModule().Components)
 
-	for _, module := range fcontext.imports {
+	for _, module := range fctx.Imports {
 		if module.As == "" {
 			doComponents("", module.Module.Components)
 		} else {

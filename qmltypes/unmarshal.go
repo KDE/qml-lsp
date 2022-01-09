@@ -1,4 +1,4 @@
-package main
+package qmltypes
 
 import (
 	"errors"
@@ -153,7 +153,7 @@ func unmarshalI(v Value, valOf reflect.Value, canArrayForMap bool) error {
 	return nil
 }
 
-func unmarshal(v Value, i interface{}) error {
+func Unmarshal(v Value, i interface{}) error {
 	valOf := reflect.ValueOf(i)
 	typOf := reflect.TypeOf(i)
 

@@ -6,19 +6,13 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"qml-lsp/analysis"
 	qml "qml-lsp/treesitter-qml"
 
 	_ "qml-lsp/qt-libpaths"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
-
-func qmlParser() *sitter.Parser {
-	parser := sitter.NewParser()
-	parser.SetLanguage(qml.GetLanguage())
-
-	return parser
-}
 
 func main() {
 	if len(os.Args) >= 3 {
@@ -27,7 +21,7 @@ func main() {
 			panic(err)
 		}
 
-		parser := qmlParser()
+		parser := analysis.QmlParser()
 		tree := parser.Parse(nil, data)
 
 		switch os.Args[1] {

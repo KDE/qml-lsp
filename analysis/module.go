@@ -1,4 +1,4 @@
-package main
+package analysis
 
 import "strings"
 
@@ -41,6 +41,10 @@ func (c *Component) GetActualName() {
 	}
 	slash++
 	c.ActualName = v[slash:space]
+}
+
+func (c *Component) SaneName() string {
+	return saneify(c.ActualName)
 }
 
 type Enum struct {

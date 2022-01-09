@@ -1,4 +1,4 @@
-package main
+package qmltypes
 
 import "github.com/alecthomas/participle/v2"
 
@@ -81,4 +81,4 @@ type SymbolURL struct {
 	Name []string `@Ident ("." @Ident)*`
 }
 
-var parser = participle.MustBuild(&QMLTypesFile{})
+var Parser = participle.MustBuild(&QMLTypesFile{})

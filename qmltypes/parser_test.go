@@ -1,11 +1,12 @@
-package main
+package qmltypes_test
 
 import (
 	_ "embed"
+	"qml-lsp/qmltypes"
 	"testing"
 )
 
-//go:embed test/builtins.qmltypes
+//go:embed qtquick/builtins.qmltypes
 var builtins string
 
 //go:embed test/QtWebEngine.qmltypes
@@ -13,7 +14,7 @@ var webengine string
 
 func TestRawParser(t *testing.T) {
 	var (
-		document QMLTypesFile
+		document qmltypes.QMLTypesFile
 		err      error
 	)
 
@@ -23,7 +24,7 @@ func TestRawParser(t *testing.T) {
 	}
 
 	for file, content := range files {
-		err = parser.ParseString(file, content, &document)
+		err = qmltypes.Parser.ParseString(file, content, &document)
 		if err != nil {
 			t.Fatalf("Failed to parse file %s: %s", file, err)
 		}
