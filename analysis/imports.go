@@ -17,6 +17,13 @@ type ASTImport struct {
 	Range PointRange
 }
 
+type URIImport struct {
+	Path string
+	As   string
+
+	Range PointRange
+}
+
 func (i *ASTImport) ModuleString() string {
 	return strings.Join(i.Module, ".")
 }
@@ -43,10 +50,31 @@ func extractVersionNumber(node *sitter.Node, b []byte) (int, int) {
 	return mustInt(it[0]), mustInt(it[1])
 }
 
-func ExtractImports(root *sitter.Node, b []byte) []ASTImport {
+func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 	var d []ASTImport
+	var u []URIImport
 	for i := 0; i < int(root.ChildCount()); i++ {
 		child := root.Child(i)
+		if child.Type() == "relative_import_statement" {
+			var uri string
+			var as string
+
+			switch child.NamedChildCount() {
+			case 2:
+				as = child.NamedChild(1).NamedChild(0).Content(b)
+				fallthrough
+			case 1:
+				uri = child.NamedChild(0).Content(b)
+				uri = uri[1 : len(uri)-1]
+			}
+
+			u = append(u, URIImport{
+				Path:  uri,
+				As:    as,
+				Range: FromNode(child),
+			})
+			continue
+		}
 		if child.Type() != "import_statement" {
 			continue
 		}
@@ -70,5 +98,5 @@ func ExtractImports(root *sitter.Node, b []byte) []ASTImport {
 			})
 		}
 	}
-	return d
+	return d, u
 }

@@ -33,13 +33,14 @@ type resultModule struct {
 }
 
 func fromRaw(s []string, vmaj, vmin int) ImportName {
-	return ImportName{strings.Join(s, "."), vmaj, vmin}
+	return ImportName{strings.Join(s, "."), vmaj, vmin, false}
 }
 
 type ImportName struct {
-	Path         string
-	MajorVersion int
-	MinorVersion int
+	Path           string
+	MajorVersion   int
+	MinorVersion   int
+	IsRelativePath bool
 }
 
 type AnalysisEngine struct {
@@ -85,7 +86,7 @@ func (s *AnalysisEngine) SetFileContext(uri string, content []byte) error {
 	fctx.Tree = it.Parse(nil, content)
 	fctx.Body = content
 
-	importData := ExtractImports(fctx.Tree.RootNode(), content)
+	importData, relativeData := ExtractImports(fctx.Tree.RootNode(), content)
 	for _, it := range importData {
 		m, err := s.GetModule(it.Module, it.MajVersion, it.MinVersion)
 		if err != nil {
@@ -95,6 +96,14 @@ func (s *AnalysisEngine) SetFileContext(uri string, content []byte) error {
 		fctx.Imports = append(fctx.Imports, ImportData{
 			Module: m,
 			URI:    fromRaw(it.Module, it.MajVersion, it.MinVersion),
+			As:     it.As,
+			Range:  it.Range,
+		})
+	}
+	for _, it := range relativeData {
+		fctx.Imports = append(fctx.Imports, ImportData{
+			Module: &Module{},
+			URI:    ImportName{Path: it.Path, IsRelativePath: true},
 			As:     it.As,
 			Range:  it.Range,
 		})
