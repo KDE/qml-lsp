@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"qml-lsp/analysis"
+	lspserver "qml-lsp/lsp-server"
 	qml "qml-lsp/treesitter-qml"
 
 	_ "qml-lsp/qt-libpaths"
@@ -67,4 +68,18 @@ func main() {
 	} else {
 		StartServer()
 	}
+}
+
+func StartServer() {
+	s := server{}
+	a := lspserver.MethodMap{
+		"initialize":                      lspserver.Zu(s.Initialize),
+		"initialized":                     lspserver.Zu(s.Initialized),
+		"textDocument/didOpen":            lspserver.Zu(s.DidOpen),
+		"textDocument/didChange":          lspserver.Zu(s.DidChange),
+		"textDocument/didClose":           lspserver.Zu(s.DidClose),
+		"textDocument/completion":         lspserver.Zu(s.Completion),
+		"workspace/didChangeWatchedFiles": lspserver.Zu(s.DidChangeWatchedFiles),
+	}
+	lspserver.StartServer(a)
 }
