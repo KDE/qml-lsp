@@ -1,8 +1,9 @@
 package analysis
 
 import (
+	"qml-lsp/lsp"
+
 	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/sourcegraph/go-lsp"
 )
 
 type PointRange struct {
@@ -19,6 +20,6 @@ func FromNode(n *sitter.Node) PointRange {
 
 func (p PointRange) ToLSP() lsp.Range {
 	return lsp.Range{
-		Start: lsp.Position{Line: int(p.StartPoint.Row), Character: int(p.StartPoint.Column)},
-		End:   lsp.Position{Line: int(p.EndPoint.Row), Character: int(p.EndPoint.Column)}}
+		Start: lsp.Position{Line: uint32(p.StartPoint.Row), Character: uint32(p.StartPoint.Column)},
+		End:   lsp.Position{Line: uint32(p.EndPoint.Row), Character: uint32(p.EndPoint.Column)}}
 }

@@ -80,6 +80,10 @@ func StartServer() {
 		"textDocument/didClose":           lspserver.Zu(s.DidClose),
 		"textDocument/completion":         lspserver.Zu(s.Completion),
 		"workspace/didChangeWatchedFiles": lspserver.Zu(s.DidChangeWatchedFiles),
+		"textDocument/codeAction":         lspserver.Zu(s.CodeAction),
+		"workspace/executeCommand":        lspserver.Zu(s.ExecuteCommand),
+		"textDocument/documentLink":       lspserver.Zu(s.DocumentLink),
+		"textDocument/codeLens":           lspserver.Zu(s.CodeLens),
 	}
 	lspserver.StartServer(a)
 }

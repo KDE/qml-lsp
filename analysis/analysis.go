@@ -16,6 +16,25 @@ type ImportData struct {
 	Range  PointRange
 }
 
+func (i ImportData) ToSourceString() string {
+	var b strings.Builder
+
+	b.WriteString("import ")
+	if i.URI.IsRelativePath {
+		// TODO: escaped strings
+		b.WriteString(fmt.Sprintf(`"%s"`, i.URI.Path))
+	} else {
+		b.WriteString(fmt.Sprintf(`%s %d.%d`, i.URI.Path, i.URI.MajorVersion, i.URI.MinorVersion))
+	}
+
+	if i.As != "" {
+		b.WriteString("as ")
+		b.WriteString(i.As)
+	}
+
+	return b.String()
+}
+
 type FileContext struct {
 	Imports []ImportData
 	Body    []byte
@@ -52,6 +71,8 @@ type AnalysisEngine struct {
 	resolvedPathsToModules     map[string]resultModule
 
 	builtinModule Module
+
+	queries Queries
 }
 
 func QmlParser() *sitter.Parser {
@@ -62,13 +83,22 @@ func QmlParser() *sitter.Parser {
 }
 
 func New(builtin Module) *AnalysisEngine {
-	return &AnalysisEngine{
+	k := &AnalysisEngine{
 		DoQMLPluginDump:            true,
 		fileContexts:               map[string]FileContext{},
 		importNamesToResolvedPaths: map[ImportName]resultSting{},
 		resolvedPathsToModules:     map[string]resultModule{},
 		builtinModule:              builtin,
+		queries:                    Queries{},
 	}
+	if err := k.queries.Init(); err != nil {
+		panic(err)
+	}
+	return k
+}
+
+func (s *AnalysisEngine) Queries() Queries {
+	return s.queries
 }
 
 func (s *AnalysisEngine) DeleteFileContext(uri string) {
@@ -115,7 +145,78 @@ func (s *AnalysisEngine) SetFileContext(uri string, content []byte) error {
 }
 
 func (s *AnalysisEngine) GetFileContext(uri string) (FileContext, error) {
-	return s.fileContexts[uri], nil
+	k, ok := s.fileContexts[uri]
+	if !ok {
+		return FileContext{}, errors.New("file context not found")
+	}
+	return k, nil
+}
+
+func (s *AnalysisEngine) UsedImports(inURI string, node *sitter.Node) ([]bool, error) {
+	fctx, err := s.GetFileContext(inURI)
+	if err != nil {
+		return nil, err
+	}
+
+	data := fctx.Body
+	imports := fctx.Imports
+	used := make([]bool, len(imports))
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	types := map[string]struct{}{}
+
+	// gather all the refernces to types in the documents
+
+	// uses in property declarations, such as
+	// property -> Kirigami.AboutPage <- aboutPage: ...
+	qc.Exec(s.queries.PropertyTypes, node)
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			types[cap.Node.Content(data)] = struct{}{}
+		}
+	}
+
+	// uses in object blocks, such as
+	// -> Kirigami.AboutPage <- { }
+	qc.Exec(s.queries.ObjectDeclarationTypes, node)
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			types[cap.Node.Content(data)] = struct{}{}
+		}
+	}
+
+	// we've gathered all our types, now we try to match them to imports
+outerLoop:
+	for kind := range types {
+		for idx := range imports {
+			importData := imports[idx]
+			isUsed := used[idx]
+
+			// if this import is already known used, we don't need to waste time
+			// checking if it's used again
+			if isUsed {
+				continue
+			}
+
+			// handle stuff like "import org.kde.kirigami 2.10 as Kirigami"
+			// Kirigami.AboutData vs AboutData.
+			prefix := ""
+			if importData.As != "" {
+				prefix = importData.As + "."
+			}
+
+			for _, component := range importData.Module.Components {
+				if prefix+component.SaneName() == kind {
+					used[idx] = true
+					continue outerLoop
+				}
+			}
+		}
+	}
+
+	return used, nil
 }
 
 func (s *AnalysisEngine) ResolveComponent(as, name string, inURI string) (Component, ImportName, *Module, error) {
