@@ -28,7 +28,7 @@ func (i ImportData) ToSourceString() string {
 	}
 
 	if i.As != "" {
-		b.WriteString("as ")
+		b.WriteString(" as ")
 		b.WriteString(i.As)
 	}
 
