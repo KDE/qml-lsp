@@ -17,6 +17,7 @@ type Queries struct {
 	InlineComponents                        *sitter.Query
 	CoercingEquality                        *sitter.Query
 	CoercingInequality                      *sitter.Query
+	AssignmentInCondition                   *sitter.Query
 }
 
 func (q *Queries) Init() error {
@@ -81,6 +82,19 @@ func (q *Queries) Init() error {
 	}
 	q.CoercingInequality, err = sitter.NewQuery([]byte(`
 (binary_expression "!=") @expression
+	`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.AssignmentInCondition, err = sitter.NewQuery([]byte(`
+(_ condition: (parenthesized_expression
+
+	[
+		(augmented_assignment_expression)
+		(assignment_expression)
+	] @assignment
+
+))
 	`), qml.GetLanguage())
 	if err != nil {
 		return err

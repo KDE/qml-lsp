@@ -50,6 +50,7 @@ func (s *server) DocumentLink(ctx context.Context, conn jsonrpc2.JSONRPC2, param
 }
 
 var diagnostics = []analysis.Diagnostics{
+	analysis.DiagnosticsJSAssignmentInCondition{},
 	analysis.DiagnosticsJSDoubleNegation{},
 	analysis.DiagnosticsJSEqualityCoercion{},
 	analysis.DiagnosticsJSVar{},
