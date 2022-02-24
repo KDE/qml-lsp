@@ -15,6 +15,8 @@ type Queries struct {
 	VariableAssignments                     *sitter.Query
 	DoubleNegation                          *sitter.Query
 	InlineComponents                        *sitter.Query
+	CoercingEquality                        *sitter.Query
+	CoercingInequality                      *sitter.Query
 }
 
 func (q *Queries) Init() error {
@@ -67,6 +69,18 @@ func (q *Queries) Init() error {
 	(identifier) @name
 	(qualified_identifier) @superclass
 	(object_block) @body)
+	`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.CoercingEquality, err = sitter.NewQuery([]byte(`
+(binary_expression "==") @expression
+	`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.CoercingInequality, err = sitter.NewQuery([]byte(`
+(binary_expression "!=") @expression
 	`), qml.GetLanguage())
 	if err != nil {
 		return err
