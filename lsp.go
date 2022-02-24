@@ -49,21 +49,13 @@ func (s *server) DocumentLink(ctx context.Context, conn jsonrpc2.JSONRPC2, param
 	return []lsp.DocumentLink{}, nil
 }
 
-var diagnostics = []analysis.Diagnostics{
-	analysis.DiagnosticsJSAssignmentInCondition{},
-	analysis.DiagnosticsJSDoubleNegation{},
-	analysis.DiagnosticsJSEqualityCoercion{},
-	analysis.DiagnosticsJSVar{},
-	analysis.DiagnosticsJSWith{},
-	analysis.DiagnosticsQMLAlias{},
-	analysis.DiagnosticsQMLUnusedImports{},
-	analysis.DiagnosticsQtQuickLayoutAnchors{},
-}
-
 func (s *server) doLints(ctx context.Context, fileURI string, diags *lsp.PublishDiagnosticsParams) {
-	for _, diag := range diagnostics {
+	for _, diag := range analysis.DefaultDiagnostics {
 		fctx, _ := s.analysis.GetFileContext(fileURI)
-		diags.Diagnostics = append(diags.Diagnostics, diag.Analyze(ctx, fileURI, fctx, s.analysis)...)
+		adiags := diag.Analyze(ctx, fileURI, fctx, s.analysis)
+		for _, d := range adiags {
+			diags.Diagnostics = append(diags.Diagnostics, d.Diagnostic)
+		}
 	}
 }
 

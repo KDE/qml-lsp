@@ -9,7 +9,7 @@ import (
 
 type DiagnosticsQMLAlias struct{}
 
-func (DiagnosticsQMLAlias) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []lsp.Diagnostic) {
+func (DiagnosticsQMLAlias) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []Diagnostic) {
 	data := fctx.Body
 
 	qc := sitter.NewQueryCursor()
@@ -21,11 +21,14 @@ func (DiagnosticsQMLAlias) Analyze(ctx context.Context, fileURI string, fctx Fil
 			if cap.Node.Content(data) != "alias" {
 				continue
 			}
-			diags = append(diags, lsp.Diagnostic{
-				Range:    FromNode(cap.Node).ToLSP(),
-				Severity: lsp.SeverityWarning,
-				Source:   "alias lint",
-				Message:  "Don't use property alias. Instead, consider binding the aliased property to a property of the concrete type on this type.",
+			diags = append(diags, Diagnostic{
+				Diagnostic: lsp.Diagnostic{
+					Range:    FromNode(cap.Node).ToLSP(),
+					Severity: lsp.SeverityWarning,
+					Source:   "alias lint",
+					Message:  "Don't use property alias. Instead, consider binding the aliased property to a property of the concrete type on this type.",
+				},
+				ContextNode: cap.Node.Parent(),
 			})
 		}
 	}

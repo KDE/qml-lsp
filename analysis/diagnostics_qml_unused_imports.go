@@ -7,7 +7,7 @@ import (
 
 type DiagnosticsQMLUnusedImports struct{}
 
-func (DiagnosticsQMLUnusedImports) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []lsp.Diagnostic) {
+func (DiagnosticsQMLUnusedImports) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []Diagnostic) {
 	imports := fctx.Imports
 	used, err := engine.UsedImports(fileURI, fctx.Tree.RootNode())
 	if err != nil {
@@ -23,11 +23,13 @@ func (DiagnosticsQMLUnusedImports) Analyze(ctx context.Context, fileURI string, 
 		}
 
 		// oops, this import isn't used! let's raise a diagnostic...
-		diags = append(diags, lsp.Diagnostic{
-			Range:    importData.Range.ToLSP(),
-			Severity: lsp.SeverityWarning,
-			Source:   "import lint",
-			Message:  "Unused import",
+		diags = append(diags, Diagnostic{
+			Diagnostic: lsp.Diagnostic{
+				Range:    importData.Range.ToLSP(),
+				Severity: lsp.SeverityWarning,
+				Source:   "import lint",
+				Message:  "Unused import",
+			},
 		})
 	}
 

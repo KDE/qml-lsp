@@ -31,7 +31,7 @@ var anchorsInLayoutWarnings = map[string]string{
 	"anchors.verticalCenterOffset":   `Don't use anchors.verticalCenterOffset in a {{kind}}. Instead, consider using "{{pfx}}Layout.topMargin" or "{{pfx}}Layout.bottomMargin"`,
 }
 
-func (DiagnosticsQtQuickLayoutAnchors) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []lsp.Diagnostic) {
+func (DiagnosticsQtQuickLayoutAnchors) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []Diagnostic) {
 	data := fctx.Body
 	imports := fctx.Imports
 
@@ -67,11 +67,14 @@ func (DiagnosticsQtQuickLayoutAnchors) Analyze(ctx context.Context, fileURI stri
 					continue
 				}
 
-				diags = append(diags, lsp.Diagnostic{
-					Range:    FromNode(match.Captures[1].Node).ToLSP(),
-					Severity: lsp.SeverityError,
-					Source:   "anchors in layouts lint",
-					Message:  strings.ReplaceAll(strings.ReplaceAll(v, "{{kind}}", pfx+comp.SaneName()), "{{pfx}}", pfx),
+				diags = append(diags, Diagnostic{
+					Diagnostic: lsp.Diagnostic{
+						Range:    FromNode(match.Captures[1].Node).ToLSP(),
+						Severity: lsp.SeverityError,
+						Source:   "anchors in layouts lint",
+						Message:  strings.ReplaceAll(strings.ReplaceAll(v, "{{kind}}", pfx+comp.SaneName()), "{{pfx}}", pfx),
+					},
+					ContextNode: match.Captures[1].Node.Parent(),
 				})
 			}
 		}

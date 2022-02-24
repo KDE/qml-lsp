@@ -9,7 +9,7 @@ import (
 
 type DiagnosticsJSVar struct{}
 
-func (DiagnosticsJSVar) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []lsp.Diagnostic) {
+func (DiagnosticsJSVar) Analyze(ctx context.Context, fileURI string, fctx FileContext, engine *AnalysisEngine) (diags []Diagnostic) {
 	data := fctx.Body
 
 	qc := sitter.NewQueryCursor()
@@ -40,18 +40,24 @@ func (DiagnosticsJSVar) Analyze(ctx context.Context, fileURI string, fctx FileCo
 		}
 
 		if isSet {
-			diags = append(diags, lsp.Diagnostic{
-				Range:    FromNode(keyword).ToLSP(),
-				Severity: lsp.SeverityWarning,
-				Source:   "var lint",
-				Message:  `Don't use var in modern JavaScript. Consider using "let" here instead.`,
+			diags = append(diags, Diagnostic{
+				Diagnostic: lsp.Diagnostic{
+					Range:    FromNode(keyword).ToLSP(),
+					Severity: lsp.SeverityWarning,
+					Source:   "var lint",
+					Message:  `Don't use var in modern JavaScript. Consider using "let" here instead.`,
+				},
+				ContextNode: match.Captures[0].Node.Parent(),
 			})
 		} else {
-			diags = append(diags, lsp.Diagnostic{
-				Range:    FromNode(keyword).ToLSP(),
-				Severity: lsp.SeverityWarning,
-				Source:   "var lint",
-				Message:  `Don't use var in modern JavaScript. Consider using "const" here instead.`,
+			diags = append(diags, Diagnostic{
+				Diagnostic: lsp.Diagnostic{
+					Range:    FromNode(keyword).ToLSP(),
+					Severity: lsp.SeverityWarning,
+					Source:   "var lint",
+					Message:  `Don't use var in modern JavaScript. Consider using "const" here instead.`,
+				},
+				ContextNode: match.Captures[0].Node.Parent(),
 			})
 		}
 	}
