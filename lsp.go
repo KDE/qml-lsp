@@ -37,7 +37,147 @@ func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 			CompletionProvider: lsp.CompletionOptions{
 				TriggerCharacters: []string{"."},
 			},
+			SemanticTokensProvider: lsp.SemanticTokensOptions{
+				Legend: lsp.SemanticTokensLegend{
+					TokenTypes: []string{
+						SemanticTokenTypeNamespace,
+						SemanticTokenTypeType,
+						SemanticTokenTypeClass,
+						SemanticTokenTypeEnum,
+						SemanticTokenTypeInterface,
+						SemanticTokenTypeStruct,
+						SemanticTokenTypeTypeParameter,
+						SemanticTokenTypeParameter,
+						SemanticTokenTypeVariable,
+						SemanticTokenTypeProperty,
+						SemanticTokenTypeEnumMember,
+						SemanticTokenTypeEvent,
+						SemanticTokenTypeFunction,
+						SemanticTokenTypeMethod,
+						SemanticTokenTypeMacro,
+						SemanticTokenTypeKeyword,
+						SemanticTokenTypeModifier,
+						SemanticTokenTypeComment,
+						SemanticTokenTypeString,
+						SemanticTokenTypeNumber,
+						SemanticTokenTypeRegexp,
+						SemanticTokenTypeOperator,
+					},
+					TokenModifiers: []string{
+						SemanticTokenTypeDeclaration,
+						SemanticTokenTypeDefinition,
+						SemanticTokenTypeReadonly,
+						SemanticTokenTypeStatic,
+						SemanticTokenTypeDeprecated,
+						SemanticTokenTypeAbstract,
+						SemanticTokenTypeAsync,
+						SemanticTokenTypeModification,
+						SemanticTokenTypeDocumentation,
+						SemanticTokenTypeDefaultLibrary,
+					},
+				},
+				Range: false,
+				Full:  true,
+			},
 		},
+	}, nil
+}
+
+func traverseTree(n *sitter.Node, f func(*sitter.Node)) {
+	f(n)
+	for i := 0; i < int(n.ChildCount()); i++ {
+		traverseTree(n.Child(i), f)
+	}
+}
+
+func (s *server) SemanticTokensFull(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.SemanticTokensParams) (*lsp.SemanticTokens, error) {
+	fileURI := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
+	fctx, err := s.analysis.GetFileContext(fileURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file URI for semantic tokens: %+w", err)
+	}
+
+	node := fctx.Tree.RootNode()
+
+	toks := []uint32{}
+
+	previousLine := uint32(0)
+	previousStartChar := uint32(0)
+
+	addToken := func(n *sitter.Node, tokenKind NumSemanticTokenKind, tokenModifiers NumSemanticTokenModifier) {
+		line := n.StartPoint().Row
+		startChar := n.StartPoint().Column
+		length := n.EndByte() - n.StartByte()
+
+		println("adding for", n.Type(), n.Content(fctx.Body), "\t", line, startChar, length)
+
+		deltaLine := line - uint32(previousLine)
+		var deltaStart uint32
+		if line == previousLine {
+			deltaStart = startChar - previousStartChar
+		} else {
+			deltaStart = startChar
+		}
+		previousLine = line
+		previousStartChar = startChar
+
+		toks = append(toks, deltaLine, deltaStart, length, uint32(tokenKind), uint32(tokenModifiers))
+	}
+	traverseTree(node, func(n *sitter.Node) {
+		switch {
+		case n.Type() == "identifier" && n.Parent().Type() == "inline_type_declaration":
+			addToken(n, NumSemanticTokenTypeType, 0)
+		case n.Type() == "qualified_identifier" && n.Parent().Type() == "inline_type_declaration":
+			addToken(n, NumSemanticTokenTypeType, 0)
+
+		case n.Type() == "qualified_identifier" && n.Parent().Type() == "import_statement":
+			addToken(n, NumSemanticTokenTypeNamespace, 0)
+		case n.Type() == "identifier" && n.Parent().Type() == "qualified_identifier" && n.Parent().Parent().Type() == "import_statement":
+			return
+		case n.Type() == "named_import" && n.Parent().Type() == "import_statement":
+			addToken(n, NumSemanticTokenTypeNamespace, 0)
+
+		case n.Type() == "type_identifier" && n.Parent().Type() == "property_type" && n.EndPoint() == n.Parent().EndPoint():
+			addToken(n, NumSemanticTokenTypeClass, 0)
+		case n.Type() == "type_identifier" && n.Parent().Type() == "property_type":
+			addToken(n, NumSemanticTokenTypeNamespace, 0)
+		case n.Parent() != nil && n.Parent().Type() == "property_type":
+			addToken(n, NumSemanticTokenTypeType, 0)
+		case n.Type() == "property_identifier":
+			addToken(n, NumSemanticTokenTypeProperty, 0)
+
+		case n.Type() == "identifier" && n.Parent().Type() == "qualified_identifier" && n.Parent().Parent().Type() == "property_set":
+			addToken(n, NumSemanticTokenTypeProperty, 0)
+
+		case n.Type() == "type_identifier" && n.Parent().Type() == "enum":
+			addToken(n, NumSemanticTokenTypeEnum, 0)
+		case n.Type() == "enum_member":
+			addToken(n, NumSemanticTokenTypeEnumMember, 0)
+
+		case n.Type() == "identifier" && n.Parent().Type() == "qualified_identifier" && n.EndPoint() == n.Parent().EndPoint():
+			addToken(n, NumSemanticTokenTypeClass, 0)
+		case n.Type() == "identifier" && n.Parent().Type() == "qualified_identifier":
+			addToken(n, NumSemanticTokenTypeNamespace, 0)
+
+		case n.Type() == "string":
+			addToken(n, NumSemanticTokenTypeString, 0)
+		case n.Type() == "regex":
+			addToken(n, NumSemanticTokenTypeRegexp, 0)
+		case n.Type() == "number":
+			addToken(n, NumSemanticTokenTypeNumber, 0)
+		case n.Type() == "comment":
+			addToken(n, NumSemanticTokenTypeComment, 0)
+
+		case n.Type() == "as",
+			n.Type() == "import",
+			n.Type() == "enum" && n.String() == "enum",
+			n.Type() == "component":
+			addToken(n, NumSemanticTokenTypeKeyword, NumSemanticTokenTypeDeprecated)
+		}
+	})
+
+	return &lsp.SemanticTokens{
+		Data: toks,
 	}, nil
 }
 

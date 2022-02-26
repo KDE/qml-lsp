@@ -73,17 +73,18 @@ func main() {
 func StartServer() {
 	s := server{}
 	a := lspserver.MethodMap{
-		"initialize":                      lspserver.Zu(s.Initialize),
-		"initialized":                     lspserver.Zu(s.Initialized),
-		"textDocument/didOpen":            lspserver.Zu(s.DidOpen),
-		"textDocument/didChange":          lspserver.Zu(s.DidChange),
-		"textDocument/didClose":           lspserver.Zu(s.DidClose),
-		"textDocument/completion":         lspserver.Zu(s.Completion),
-		"workspace/didChangeWatchedFiles": lspserver.Zu(s.DidChangeWatchedFiles),
-		"textDocument/codeAction":         lspserver.Zu(s.CodeAction),
-		"workspace/executeCommand":        lspserver.Zu(s.ExecuteCommand),
-		"textDocument/documentLink":       lspserver.Zu(s.DocumentLink),
-		"textDocument/codeLens":           lspserver.Zu(s.CodeLens),
+		"initialize":                       lspserver.Zu(s.Initialize),
+		"initialized":                      lspserver.Zu(s.Initialized),
+		"textDocument/didOpen":             lspserver.Zu(s.DidOpen),
+		"textDocument/didChange":           lspserver.Zu(s.DidChange),
+		"textDocument/didClose":            lspserver.Zu(s.DidClose),
+		"textDocument/completion":          lspserver.Zu(s.Completion),
+		"workspace/didChangeWatchedFiles":  lspserver.Zu(s.DidChangeWatchedFiles),
+		"textDocument/codeAction":          lspserver.Zu(s.CodeAction),
+		"workspace/executeCommand":         lspserver.Zu(s.ExecuteCommand),
+		"textDocument/documentLink":        lspserver.Zu(s.DocumentLink),
+		"textDocument/codeLens":            lspserver.Zu(s.CodeLens),
+		"textDocument/semanticTokens/full": lspserver.Zu(s.SemanticTokensFull),
 	}
 	lspserver.StartServer(a)
 }
