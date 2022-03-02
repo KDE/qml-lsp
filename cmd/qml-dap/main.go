@@ -1,36 +1,38 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"os/exec"
+	"qml-lsp/debugclient"
 	"runtime"
 )
 
 type obj map[string]interface{}
 
-func serverMain(h *handle) {
+func serverMain(h *debugclient.Handle) {
 	StartServer(h)
 }
 
-// func pront(s string) {
-// 	cmd := exec.Command("systemd-cat")
-// 	var b bytes.Buffer
-// 	b.Write([]byte(s))
-// 	cmd.Stdin = &b
-// 	err := cmd.Start()
+func pront(s string) {
+	cmd := exec.Command("systemd-cat")
+	var b bytes.Buffer
+	b.Write([]byte(s))
+	cmd.Stdin = &b
+	err := cmd.Start()
 
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	if err != nil {
+		panic(err)
+	}
 
-// 	err = cmd.Wait()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// }
+	err = cmd.Wait()
+	if err != nil {
+		panic(err)
+	}
+}
 
 func main() {
-	h := new(handle)
-	h.init()
+	h := debugclient.New()
 	h.Callback = func(i json.RawMessage) {
 		println(string(i))
 	}
@@ -46,7 +48,7 @@ func main() {
 	}()
 
 	runtime.LockOSThread()
-	h.invoke(obj{"method": "init"})
+	h.Init()
 	initted <- true
-	h.exec()
+	h.RunEventLoop()
 }

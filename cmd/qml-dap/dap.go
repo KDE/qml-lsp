@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"qml-lsp/debugclient"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,14 +19,9 @@ import (
 )
 
 type server struct {
-	h *handle
+	h *debugclient.Handle
 
-	evaluate   chan json.RawMessage
-	stackTrace chan json.RawMessage
-	scope      chan json.RawMessage
-	lookup     chan json.RawMessage
-
-	frames map[int]Frames
+	frames map[int]debugclient.Frames
 
 	launchData struct {
 		name   string
@@ -58,27 +54,7 @@ func (s *server) qmlDbgCallback(i json.RawMessage) {
 			ThreadId:          1,
 			AllThreadsStopped: true,
 		}})
-	} else if m["signal"] == "v4-result" {
-		if m["command"] == "evaluate" {
-			s.evaluate <- i
-		} else if m["command"] == "backtrace" {
-			s.stackTrace <- i
-		} else if m["command"] == "scope" {
-			s.scope <- i
-		} else if m["command"] == "lookup" {
-			s.lookup <- i
-		}
-	} else if m["signal"] == "v4-failure" {
-		if m["command"] == "evaluate" {
-			s.evaluate <- i
-		} else if m["command"] == "backtrace" {
-			s.stackTrace <- i
-		} else if m["command"] == "scope" {
-			s.scope <- i
-		} else if m["command"] == "lookup" {
-			s.lookup <- i
-		}
-	} else if m["signal"] == "v4-connected" {
+	} else if m["signal"] == "disconnected" {
 		c.Notify("terminated", &dap.ProcessEvent{
 			Body: dap.ProcessEventBody{
 				Name:            s.launchData.name,
@@ -86,8 +62,6 @@ func (s *server) qmlDbgCallback(i json.RawMessage) {
 				SystemProcessId: s.launchData.pid,
 			},
 		})
-	} else if m["signal"] == "disconnected" {
-		c.Notify("terminated", &dap.TerminatedEvent{})
 	}
 }
 
@@ -95,11 +69,7 @@ func (s *server) Initialize(ctx context.Context, conn *connection, params *dap.I
 	conn.Notify("initialized", &dap.InitializedEvent{})
 
 	s.h.Callback = s.qmlDbgCallback
-	s.frames = map[int]Frames{}
-	s.evaluate = make(chan json.RawMessage)
-	s.stackTrace = make(chan json.RawMessage)
-	s.scope = make(chan json.RawMessage)
-	s.lookup = make(chan json.RawMessage)
+	s.frames = map[int]debugclient.Frames{}
 
 	return &dap.InitializeResponse{
 		Body: dap.Capabilities{},
@@ -114,7 +84,7 @@ func (s *server) Continue(
 	ctx context.Context, conn *connection,
 	params *dap.ContinueRequest) (*dap.ContinueResponse, error) {
 
-	s.h.invoke(obj{"method": "continue", "kind": "continue"})
+	s.h.Continue()
 
 	return &dap.ContinueResponse{}, nil
 }
@@ -123,7 +93,7 @@ func (s *server) Pause(
 	ctx context.Context, conn *connection,
 	params *dap.PauseRequest) (*dap.PauseResponse, error) {
 
-	s.h.invoke(obj{"method": "interrupt"})
+	s.h.Interrupt()
 
 	return &dap.PauseResponse{}, nil
 }
@@ -135,11 +105,11 @@ func (s *server) Scopes(
 	frame := s.frames[params.Arguments.FrameId]
 
 	kinds := map[int]string{
-		ScopeGlobal:  "global",
-		ScopeLocal:   "local",
-		ScopeWith:    "with",
-		ScopeClosure: "closure",
-		ScopeCatch:   "catch",
+		debugclient.ScopeGlobal:  "global",
+		debugclient.ScopeLocal:   "local",
+		debugclient.ScopeWith:    "with",
+		debugclient.ScopeClosure: "closure",
+		debugclient.ScopeCatch:   "catch",
 	}
 
 	r := &dap.ScopesResponse{}
@@ -159,7 +129,7 @@ func (s *server) Next(
 	ctx context.Context, conn *connection,
 	params *dap.NextRequest) (*dap.NextResponse, error) {
 
-	s.h.invoke(obj{"method": "continue", "kind": "next"})
+	s.h.StepNext()
 
 	return &dap.NextResponse{}, nil
 }
@@ -168,7 +138,7 @@ func (s *server) StepIn(
 	ctx context.Context, conn *connection,
 	params *dap.StepInRequest) (*dap.StepInResponse, error) {
 
-	s.h.invoke(obj{"method": "continue", "kind": "in"})
+	s.h.StepIn()
 
 	return &dap.StepInResponse{}, nil
 }
@@ -177,7 +147,7 @@ func (s *server) StepOut(
 	ctx context.Context, conn *connection,
 	params *dap.StepOutRequest) (*dap.StepOutResponse, error) {
 
-	s.h.invoke(obj{"method": "continue", "kind": "out"})
+	s.h.StepNext()
 
 	return &dap.StepOutResponse{}, nil
 }
@@ -186,28 +156,22 @@ func (s *server) Evaluate(
 	ctx context.Context, conn *connection,
 	params *dap.EvaluateRequest) (*dap.EvaluateResponse, error) {
 
-	s.h.invoke(obj{"method": "eval", "script": params.Arguments.Expression})
-
-	msg := <-s.evaluate
-
-	var m struct {
-		Signal string   `json:"signal"`
-		Body   QMLValue `json:"body"`
+	m, err, ok := s.h.Evaluate(params.Arguments.Expression)
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate: %+w", err)
 	}
-	json.Unmarshal(msg, &m)
-
-	if m.Signal == "v4-failure" {
+	if !ok {
 		return nil, errors.New("eval failed")
 	}
 
 	ref := 0
-	if m.Body.Ref != 0 && m.Body.Type != "function" {
-		ref = (1 << 16) | m.Body.Ref
+	if m.Ref != 0 && m.Type != "function" {
+		ref = (1 << 16) | m.Ref
 	}
 
 	return &dap.EvaluateResponse{
 		Body: dap.EvaluateResponseBody{
-			Result:             m.Body.String(),
+			Result:             m.String(),
 			VariablesReference: ref,
 		},
 	}, nil
@@ -236,87 +200,6 @@ func (s *server) SetExceptionBreakpoints(
 	return &dap.SetExceptionBreakpointsResponse{}, nil
 }
 
-type StackFramesResponse struct {
-	Body    StackFramesBody `json:"body"`
-	Command string          `json:"command"`
-	Signal  string          `json:"signal"`
-}
-type Scopes struct {
-	Index int `json:"index"`
-	Type  int `json:"type"`
-}
-type Frames struct {
-	DebuggerFrame bool     `json:"debuggerFrame"`
-	Func          string   `json:"func"`
-	Index         int      `json:"index"`
-	Line          int      `json:"line"`
-	Scopes        []Scopes `json:"scopes"`
-	Script        string   `json:"script"`
-}
-type StackFramesBody struct {
-	Frames    []Frames `json:"frames"`
-	FromFrame int      `json:"fromFrame"`
-	ToFrame   int      `json:"toFrame"`
-}
-
-type ScopeResponse struct {
-	Body    ScopeBody `json:"body"`
-	Command string    `json:"command"`
-	Signal  string    `json:"signal"`
-}
-
-type ScopeBody struct {
-	FrameIndex int      `json:"frameIndex"`
-	Index      int      `json:"index"`
-	Object     QMLValue `json:"object"`
-	Type       int      `json:"type"`
-}
-
-type LookupResponse struct {
-	Body    map[string]QMLValue `json:"body"`
-	Command string              `json:"command"`
-	Signal  string              `json:"signal"`
-}
-type QMLValue struct {
-	Type       string          `json:"type"`
-	Handle     int             `json:"handle"`
-	Value      json.RawMessage `json:"value"`
-	Ref        int             `json:"ref,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Properties []QMLValue      `json:"properties,omitempty"`
-}
-
-func (v *QMLValue) String() string {
-	switch v.Type {
-	case "undefined":
-		return "undefined"
-	case "null":
-		return "null"
-	case "boolean":
-		return string(v.Value)
-	case "number":
-		return string(v.Value)
-	case "string":
-		return string(v.Value)
-	case "object":
-		return "[object Object]"
-	case "function":
-		return fmt.Sprintf("[function %s]", v.Name)
-	case "script":
-		return fmt.Sprintf("[script %s]", v.Name)
-	default:
-		return fmt.Sprintf("[%s %s]", v.Type, string(v.Value))
-	}
-}
-
-const (
-	ScopeGlobal  = 0x0
-	ScopeLocal   = 0x1
-	ScopeWith    = 0x2
-	ScopeClosure = 0x3
-	ScopeCatch   = 0x4
-)
-
 func (s *server) Variables(
 	ctx context.Context, conn *connection,
 	params *dap.VariablesRequest) (*dap.VariablesResponse, error) {
@@ -329,16 +212,7 @@ func (s *server) Variables(
 	if isHandle != 0 {
 		handle := ref & 0xFF
 
-		s.h.invoke(obj{
-			"method":         "lookup",
-			"include-source": true,
-			"handles":        []int{handle},
-		})
-
-		lmsg := <-s.lookup
-		var lresponse LookupResponse
-
-		feh := json.Unmarshal(lmsg, &lresponse)
+		lresponse, feh := s.h.Lookup(true, handle)
 		if feh != nil {
 			return nil, fmt.Errorf("failed to get variables: %w", feh)
 		}
@@ -369,30 +243,12 @@ func (s *server) Variables(
 		}, nil
 	}
 
-	s.h.invoke(obj{
-		"method":       "scope",
-		"frame-number": frame,
-		"scope-number": scope,
-	})
-
-	msg := <-s.scope
-	var response ScopeResponse
-
-	feh := json.Unmarshal(msg, &response)
+	response, feh := s.h.Scope(frame, scope)
 	if feh != nil {
 		return nil, fmt.Errorf("failed to get variables: %w", feh)
 	}
 
-	s.h.invoke(obj{
-		"method":         "lookup",
-		"include-source": true,
-		"handles":        []int{response.Body.Object.Handle},
-	})
-
-	lmsg := <-s.lookup
-	var lresponse LookupResponse
-
-	feh = json.Unmarshal(lmsg, &lresponse)
+	lresponse, feh := s.h.Lookup(true, response.Body.Object.Handle)
 	if feh != nil {
 		return nil, fmt.Errorf("failed to get variables: %w", feh)
 	}
@@ -427,13 +283,7 @@ func (s *server) StackTrace(
 	ctx context.Context, conn *connection,
 	params *dap.StackTraceRequest) (*dap.StackTraceResponse, error) {
 
-	s.h.invoke(obj{"method": "backtrace"})
-
-	msg := <-s.stackTrace
-
-	var response StackFramesResponse
-
-	feh := json.Unmarshal(msg, &response)
+	response, feh := s.h.Backtrace()
 	if feh != nil {
 		return nil, fmt.Errorf("failed to get stack trace: %w", feh)
 	}
@@ -477,7 +327,7 @@ func (s *server) Attach(
 	s.launchData.pid = 0
 	s.launchData.method = "attach"
 
-	s.h.invoke(obj{"method": "connect", "target": t.Target})
+	s.h.Connect(t.Target)
 
 	return &dap.AttachResponse{}, nil
 }
@@ -498,7 +348,7 @@ func (s *server) Launch(ctx context.Context, conn *connection, params *dap.Launc
 	}
 	feh := cmd.Start()
 	if feh != nil {
-		return nil, feh
+		return nil, fmt.Errorf("failed to start launch command: %+w", feh)
 	}
 
 	s.launchData.name = path.Base(t.Program)
@@ -507,7 +357,7 @@ func (s *server) Launch(ctx context.Context, conn *connection, params *dap.Launc
 
 	time.Sleep(1 * time.Second)
 
-	s.h.invoke(obj{"method": "connect", "target": "localhost:5050"})
+	s.h.Connect("localhost:5050")
 
 	return &dap.LaunchResponse{}, nil
 }
@@ -558,7 +408,7 @@ func zu(fn interface{}) method {
 	}
 }
 
-func StartServer(h *handle) {
+func StartServer(h *debugclient.Handle) {
 	reader := bufio.NewReader(os.Stdin)
 	s := server{h: h}
 	a := methodmap{
