@@ -104,12 +104,12 @@ func whatUses(ctx *cli.Context) error {
 						continue
 					}
 					if prefix+component.SaneName() == usageKind {
-						fmt.Printf("%s:%d:%d uses %s from %s version %d\n", path, location.Column, location.Row, component.SaneName(), pkg, ver)
+						fmt.Printf("%s:%d:%d uses %s\n", path, location.Column, location.Row, component.SaneName())
 						continue outerLoop
 					}
 				}
 				if prefix != "" && strings.HasPrefix(usageKind, prefix) {
-					fmt.Printf("%s:%d:%d uses %s from %s version %d (weak match, type not found in qmltypes)\n", path, location.Column, location.Row, usageKind, pkg, ver)
+					fmt.Printf("%s:%d:%d uses %s (weak match, type not found in qmltypes)\n", path, location.Column, location.Row, usageKind)
 					continue outerLoop
 				}
 			}
