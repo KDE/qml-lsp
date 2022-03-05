@@ -14,6 +14,8 @@ type ImportData struct {
 	Module *Module
 	As     string
 	Range  PointRange
+	Node   *sitter.Node
+	Error  error
 }
 
 func (i ImportData) ToSourceString() string {
@@ -120,7 +122,13 @@ func (s *AnalysisEngine) SetFileContext(uri string, content []byte) error {
 	for _, it := range importData {
 		m, err := s.GetModule(it.Module, it.MajVersion, it.MinVersion)
 		if err != nil {
-			// println(err.Error())
+			fctx.Imports = append(fctx.Imports, ImportData{
+				Module: &Module{},
+				URI:    fromRaw(it.Module, it.MajVersion, it.MinVersion),
+				As:     it.As,
+				Range:  it.Range,
+				Error:  err,
+			})
 			continue
 		}
 		fctx.Imports = append(fctx.Imports, ImportData{
@@ -152,6 +160,40 @@ func (s *AnalysisEngine) GetFileContext(uri string) (FileContext, error) {
 	return k, nil
 }
 
+func (s *AnalysisEngine) TypeReferences(inURI string, node *sitter.Node) ([]*sitter.Node, error) {
+	_, err := s.GetFileContext(inURI)
+	if err != nil {
+		return nil, err
+	}
+
+	types := []*sitter.Node{}
+
+	qc := sitter.NewQueryCursor()
+	defer qc.Close()
+
+	// gather all the refernces to types in the documents
+
+	// uses in property declarations, such as
+	// property -> Kirigami.AboutPage <- aboutPage: ...
+	qc.Exec(s.queries.PropertyTypes, node)
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			types = append(types, cap.Node)
+		}
+	}
+
+	// uses in object blocks, such as
+	// -> Kirigami.AboutPage <- { }
+	qc.Exec(s.queries.ObjectDeclarationTypes, node)
+	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+		for _, cap := range match.Captures {
+			types = append(types, cap.Node)
+		}
+	}
+
+	return types, nil
+}
+
 func (s *AnalysisEngine) UsedImports(inURI string, node *sitter.Node) ([]bool, error) {
 	fctx, err := s.GetFileContext(inURI)
 	if err != nil {
@@ -165,31 +207,15 @@ func (s *AnalysisEngine) UsedImports(inURI string, node *sitter.Node) ([]bool, e
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	types := map[string]struct{}{}
-
-	// gather all the refernces to types in the documents
-
-	// uses in property declarations, such as
-	// property -> Kirigami.AboutPage <- aboutPage: ...
-	qc.Exec(s.queries.PropertyTypes, node)
-	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
-		for _, cap := range match.Captures {
-			types[cap.Node.Content(data)] = struct{}{}
-		}
-	}
-
-	// uses in object blocks, such as
-	// -> Kirigami.AboutPage <- { }
-	qc.Exec(s.queries.ObjectDeclarationTypes, node)
-	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
-		for _, cap := range match.Captures {
-			types[cap.Node.Content(data)] = struct{}{}
-		}
+	types, err := s.TypeReferences(inURI, node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get references to types: %+w", err)
 	}
 
 	// we've gathered all our types, now we try to match them to imports
 outerLoop:
-	for kind := range types {
+	for _, tkind := range types {
+		kind := tkind.Content(data)
 		for idx := range imports {
 			importData := imports[idx]
 			isUsed := used[idx]

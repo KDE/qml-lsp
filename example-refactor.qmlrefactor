@@ -1,0 +1,31 @@
+import Refactoring 1.0
+
+Refactoring {
+    PreferredAlias {
+        for: "org.kde.plasma.components"
+        majorVersion: 3
+        minorVersion: 0
+        alias: "PC3"
+    }
+    PreferredAlias {
+        for: "org.kde.plasma.extras"
+        majorVersion: 2
+        minorVersion: 0
+        alias: "PE"
+    }
+
+    ReplaceUses {
+        of: Component {
+            uri: "org.kde.plasma.components"
+            majorVersion: 2
+            minorVersion: 0
+            name: "Highlight"
+        }
+        with: Component {
+            uri: "org.kde.plasma.extras"
+            majorVersion: 2
+            minorVersion: 0
+            name: "Highlight"
+        }
+    }
+}

@@ -53,8 +53,8 @@ func extractVersionNumber(node *sitter.Node, b []byte) (int, int) {
 func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 	var d []ASTImport
 	var u []URIImport
-	for i := 0; i < int(root.ChildCount()); i++ {
-		child := root.Child(i)
+	for i := 0; i < int(root.NamedChildCount()); i++ {
+		child := root.NamedChild(i)
 		if child.HasError() {
 			continue
 		}
@@ -82,21 +82,21 @@ func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 			continue
 		}
 		switch child.NamedChildCount() {
-		case 3:
-			maj, min := extractVersionNumber(child.Child(2), b)
+		case 2:
+			maj, min := extractVersionNumber(child.NamedChild(1), b)
 			d = append(d, ASTImport{
-				Module:     ExtractQualifiedIdentifier(child.Child(1), b),
+				Module:     ExtractQualifiedIdentifier(child.NamedChild(0), b),
 				MajVersion: maj,
 				MinVersion: min,
 				Range:      FromNode(child),
 			})
-		case 4:
-			maj, min := extractVersionNumber(child.Child(2), b)
+		case 3:
+			maj, min := extractVersionNumber(child.NamedChild(1), b)
 			d = append(d, ASTImport{
-				Module:     ExtractQualifiedIdentifier(child.Child(1), b),
+				Module:     ExtractQualifiedIdentifier(child.NamedChild(0), b),
 				MajVersion: maj,
 				MinVersion: min,
-				As:         child.Child(3).Child(1).Content(b),
+				As:         child.NamedChild(2).NamedChild(0).Content(b),
 				Range:      FromNode(child),
 			})
 		}

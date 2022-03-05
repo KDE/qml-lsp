@@ -9,12 +9,16 @@ import (
 type PointRange struct {
 	StartPoint sitter.Point
 	EndPoint   sitter.Point
+	StartByte  uint32
+	EndByte    uint32
 }
 
 func FromNode(n *sitter.Node) PointRange {
 	return PointRange{
 		StartPoint: n.StartPoint(),
 		EndPoint:   n.EndPoint(),
+		StartByte:  n.StartByte(),
+		EndByte:    n.EndByte(),
 	}
 }
 

@@ -15,6 +15,75 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+func refactor(ctx *cli.Context) error {
+	if ctx.Args().Len() < 1 {
+		println("I need you to give me a refactor manifest.")
+	}
+
+	manifestPath := ctx.Args().Get(0)
+	manifestData, err := ioutil.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("failed to read file %s while loading refactor manifest: %+w", manifestPath, err)
+	}
+
+	eng := analysis.New(qtquick.BuiltinModule())
+	eng.DoQMLPluginDump = ctx.Bool("use-qmlplugindump")
+
+	refactoring, err := analysis.LoadRefactorManifest(manifestPath, manifestData)
+	if err != nil {
+		return fmt.Errorf("failed to load refactoring manifest: %+w", err)
+	}
+
+	walkQmlFiles(".", func(path string, d fs.DirEntry, err error) error {
+		data, err := ioutil.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s while analysing: %+w", path, err)
+		}
+
+		eng.SetFileContext(path, data)
+		_, err = eng.GetFileContext(path)
+		if err != nil {
+			return fmt.Errorf("failed to analyse file %s: %+w", path, err)
+		}
+
+		err = refactoring.Execute(path, eng)
+		if err != nil {
+			return fmt.Errorf("failed to refactor file %s: %+w", path, err)
+		}
+
+		fctx, err := eng.GetFileContext(path)
+		if err != nil {
+			return fmt.Errorf("failed to analyse refactored file %s: %+w", path, err)
+		}
+
+		err = ioutil.WriteFile(path, fctx.Body, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("failed to write refactored file %s: %+w", path, err)
+		}
+
+		return nil
+	})
+
+	return nil
+}
+
+func walkQmlFiles(from string, walk fs.WalkDirFunc) error {
+	return filepath.WalkDir(from, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".qml") {
+			return nil
+		}
+
+		return walk(path, d, err)
+	})
+}
+
 func whatUses(ctx *cli.Context) error {
 	if ctx.Args().Len() < 2 {
 		println("I need you to tell me the [package] and [major-version] to search for.")
@@ -31,18 +100,7 @@ func whatUses(ctx *cli.Context) error {
 
 	eng := analysis.New(qtquick.BuiltinModule())
 	eng.DoQMLPluginDump = ctx.Bool("use-qmlplugindump")
-	err = filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".qml") {
-			return nil
-		}
-
+	err = walkQmlFiles(".", func(path string, d fs.DirEntry, err error) error {
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read file %s while analysing: %+w", path, err)
@@ -61,31 +119,16 @@ func whatUses(ctx *cli.Context) error {
 		qc := sitter.NewQueryCursor()
 		defer qc.Close()
 
-		types := map[string]sitter.Point{}
-
-		// gather all the refernces to types in the documents
-
-		// uses in property declarations, such as
-		// property -> Kirigami.AboutPage <- aboutPage: ...
-		qc.Exec(eng.Queries().PropertyTypes, node)
-		for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
-			for _, cap := range match.Captures {
-				types[cap.Node.Content(data)] = cap.Node.StartPoint()
-			}
-		}
-
-		// uses in object blocks, such as
-		// -> Kirigami.AboutPage <- { }
-		qc.Exec(eng.Queries().ObjectDeclarationTypes, node)
-		for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
-			for _, cap := range match.Captures {
-				types[cap.Node.Content(data)] = cap.Node.StartPoint()
-			}
+		types, err := eng.TypeReferences(path, node)
+		if err != nil {
+			return fmt.Errorf("failed to get references to types: %+w", err)
 		}
 
 		// we've gathered all our types, now we try to match them to imports
 	outerLoop:
-		for usageKind, location := range types {
+		for _, usage := range types {
+			usageKind := usage.Content(data)
+			location := usage.StartPoint()
 			for idx := range imports {
 				importData := imports[idx]
 				if importData.URI.Path != pkg || importData.URI.MajorVersion != ver {
@@ -128,6 +171,9 @@ func main() {
 				Name: "use-qmlplugindump",
 			},
 		},
+		ExitErrHandler: func(context *cli.Context, err error) {
+			println(err.Error())
+		},
 		Commands: []*cli.Command{
 			{
 				Name:   "what-uses",
@@ -138,6 +184,10 @@ func main() {
 						Usage: "search for specific usages of this component",
 					},
 				},
+			},
+			{
+				Name:   "refactor",
+				Action: refactor,
 			},
 		},
 	}
