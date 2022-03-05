@@ -9,7 +9,7 @@ import (
 type Refactoring struct {
 	PreferredAliases          []RefactorPreferredAlias            `qml:"@PreferredAlias"`
 	ReplaceUses               []RefactorReplaceUses               `qml:"@ReplaceUses"`
-	ReplaceVarWithLetAndConst []RefactorReplaceVarWithLetAndConst `qml:"@ReplaceUses"`
+	ReplaceVarWithLetAndConst []RefactorReplaceVarWithLetAndConst `qml:"@ReplaceVarWithLetAndConst"`
 }
 type RefactorComponent struct {
 	URI          string `qml:"uri"`

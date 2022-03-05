@@ -116,4 +116,15 @@ func TestUnmarshal(t *testing.T) {
 	if thonk.Hms[0].Val != 1 || thonk.Hms[1].Val != 2 {
 		t.Fatalf("got wrong value for struct children")
 	}
+
+	val = qmltypes.Value{Object: &qmltypes.Object{
+		Items: []qmltypes.Item{},
+	}}
+	err = qmltypes.Unmarshal(val, &thonk)
+	if err != nil {
+		t.Fatalf("failed to unmarshal struct with children: %s", err)
+	}
+	if len(thonk.Hms) > 0 {
+		t.Fatalf("got wrong value for struct children, expected 0")
+	}
 }
