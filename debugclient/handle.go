@@ -26,6 +26,7 @@ type Handle struct {
 	lookup           chan json.RawMessage
 	setBreakpoint    chan json.RawMessage
 	changeBreakpoint chan json.RawMessage
+	clearBreakpoint  chan json.RawMessage
 }
 
 //export goCallback
@@ -43,6 +44,7 @@ func New() *Handle {
 	h.lookup = make(chan json.RawMessage)
 	h.setBreakpoint = make(chan json.RawMessage)
 	h.changeBreakpoint = make(chan json.RawMessage)
+	h.clearBreakpoint = make(chan json.RawMessage)
 	return h
 }
 func (h *Handle) callback(s *C.char) {
@@ -72,6 +74,8 @@ func (h *Handle) callback(s *C.char) {
 			h.setBreakpoint <- r
 		} else if m["command"] == "changebreakpoint" {
 			h.changeBreakpoint <- r
+		} else if m["command"] == "clearbreakpoint" {
+			h.clearBreakpoint <- r
 		}
 	} else if m["signal"] == "v4-failure" {
 		if m["command"] == "evaluate" {
@@ -86,6 +90,8 @@ func (h *Handle) callback(s *C.char) {
 			h.setBreakpoint <- r
 		} else if m["command"] == "changebreakpoint" {
 			h.changeBreakpoint <- r
+		} else if m["command"] == "clearbreakpoint" {
+			h.clearBreakpoint <- r
 		}
 	}
 

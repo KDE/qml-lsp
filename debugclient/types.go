@@ -51,6 +51,9 @@ type ChangeBreakpointResponse struct {
 	Type string `json:"type"`
 }
 
+type ClearBreakpointResponse struct {
+}
+
 type LookupResponse struct {
 	Body    map[string]QMLValue `json:"body"`
 	Command string              `json:"command"`

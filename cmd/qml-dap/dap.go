@@ -21,7 +21,8 @@ import (
 type server struct {
 	h *debugclient.Handle
 
-	frames map[int]debugclient.Frames
+	frames      map[int]debugclient.Frames
+	breakpoints map[string][]int
 
 	launchData struct {
 		name   string
@@ -70,6 +71,7 @@ func (s *server) Initialize(ctx context.Context, conn *connection, params *dap.I
 
 	s.h.Callback = s.qmlDbgCallback
 	s.frames = map[int]debugclient.Frames{}
+	s.breakpoints = map[string][]int{}
 
 	return &dap.InitializeResponse{
 		Body: dap.Capabilities{},
@@ -77,7 +79,31 @@ func (s *server) Initialize(ctx context.Context, conn *connection, params *dap.I
 }
 
 func (s *server) SetBreakpoints(ctx context.Context, conn *connection, params *dap.SetBreakpointsRequest) (*dap.SetBreakpointsResponse, error) {
-	return &dap.SetBreakpointsResponse{}, nil
+	path := params.Arguments.Source.Path
+	if v, ok := s.breakpoints[path]; ok {
+		for _, bpoint := range v {
+			_, feh := s.h.ClearBreakpoint(bpoint)
+			if feh != nil {
+				return nil, fmt.Errorf("failed to clear breakpoints before setting breakpoints: %+w", feh)
+			}
+		}
+	}
+	breakpointIDs := []int{}
+	resp := &dap.SetBreakpointsResponse{}
+	for _, it := range params.Arguments.Breakpoints {
+		bpoint, feh := s.h.SetBreakpoint(path, it.Line)
+		if feh != nil {
+			return nil, fmt.Errorf("failed to set breakpoints: %+w", feh)
+		}
+		breakpointIDs = append(breakpointIDs, bpoint.ID)
+		resp.Body.Breakpoints = append(resp.Body.Breakpoints, dap.Breakpoint{
+			Id:     bpoint.ID,
+			Source: params.Arguments.Source,
+			Line:   it.Line,
+		})
+	}
+	s.breakpoints[path] = breakpointIDs
+	return resp, nil
 }
 
 func (s *server) Continue(

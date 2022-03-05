@@ -79,6 +79,8 @@ QJsonObject Handle::dispatch(QJsonObject req)
     } else if (req["method"] == "set-breakpoint-enabled") {
         dbgClient->changeBreakpoint(req["number"].toInt(), req["enabled"].toBool());
         return OK;
+    } else if (req["method"] == "clear-breakpoint") {
+        dbgClient->clearBreakpoint(req["number"].toInt());
     }
 
     return NOT_FOUND;

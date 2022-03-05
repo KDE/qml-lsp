@@ -72,6 +72,25 @@ func (h *Handle) SetBreakpointEnabled(num int, enabled bool) (ChangeBreakpointRe
 	return m.Body, nil
 }
 
+func (h *Handle) ClearBreakpoint(num int) (ClearBreakpointResponse, error) {
+	h.invoke(obj{
+		"method": "clear-breakpoint",
+		"number": num,
+	})
+
+	msg := <-h.clearBreakpoint
+
+	var m struct {
+		Body ClearBreakpointResponse `json:"body"`
+	}
+	feh := json.Unmarshal(msg, &m)
+	if feh != nil {
+		return ClearBreakpointResponse{}, fmt.Errorf("failed to decode breakpoint response: %+w", feh)
+	}
+
+	return m.Body, nil
+}
+
 func (h *Handle) SetBreakpoint(file string, line int) (SetBreakpointResponse, error) {
 	h.invoke(obj{
 		"method": "set-breakpoint",
