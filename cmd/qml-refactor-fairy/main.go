@@ -10,7 +10,9 @@ import (
 	"qml-lsp/qmltypes/qtquick"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/iafan/cwalk"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/urfave/cli/v2"
 )
@@ -34,12 +36,18 @@ func refactor(ctx *cli.Context) error {
 		return fmt.Errorf("failed to load refactoring manifest: %+w", err)
 	}
 
-	walkQmlFiles(".", func(path string, d fs.DirEntry, err error) error {
+	mtx := sync.Mutex{}
+
+	walkQmlFilesConcurrently(".", func(path string, d os.FileInfo, err error) error {
+		println("Reading", path)
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read file %s while analysing: %+w", path, err)
 		}
 
+		mtx.Lock()
+		defer mtx.Unlock()
+		println("Refactoring", path)
 		eng.SetFileContext(path, data)
 		_, err = eng.GetFileContext(path)
 		if err != nil {
@@ -61,6 +69,7 @@ func refactor(ctx *cli.Context) error {
 			return fmt.Errorf("failed to write refactored file %s: %+w", path, err)
 		}
 
+		println("Finished refactoring", path)
 		return nil
 	})
 
@@ -69,6 +78,23 @@ func refactor(ctx *cli.Context) error {
 
 func walkQmlFiles(from string, walk fs.WalkDirFunc) error {
 	return filepath.WalkDir(from, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".qml") {
+			return nil
+		}
+
+		return walk(path, d, err)
+	})
+}
+
+func walkQmlFilesConcurrently(from string, walk filepath.WalkFunc) error {
+	return cwalk.Walk(from, func(path string, d os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
