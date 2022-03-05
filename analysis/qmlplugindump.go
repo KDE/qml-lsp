@@ -12,7 +12,7 @@ func qmlPluginDump(uri []string, vmaj, vmin int) (output []byte, err error) {
 		if err != nil {
 			log.Printf("failed to run qmlplugindump for %s %d.%d: %s", strings.Join(uri, "."), vmaj, vmin, err)
 		} else {
-			log.Printf("successfully ran qmlplugindump!\n%s", string(output))
+			log.Printf("successfully ran qmlplugindump!\n")
 		}
 	}()
 	log.Printf("qmltypes for %s %d.%d not found, running qmlplugindump...", strings.Join(uri, "."), vmaj, vmin)

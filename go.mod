@@ -10,5 +10,6 @@ require (
 	github.com/mattn/go-pointer v0.0.1
 	github.com/smacker/go-tree-sitter v0.0.0-20210922091224-7d35f700adf0
 	github.com/sourcegraph/jsonrpc2 v0.1.0
+	github.com/urfave/cli/v2 v2.3.0 // indirect
 	golang.org/x/sys v0.0.0-20220227234510-4e6760a101f9 // indirect
 )

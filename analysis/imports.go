@@ -55,6 +55,9 @@ func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 	var u []URIImport
 	for i := 0; i < int(root.ChildCount()); i++ {
 		child := root.Child(i)
+		if child.HasError() {
+			continue
+		}
 		if child.Type() == "relative_import_statement" {
 			var uri string
 			var as string
@@ -78,7 +81,7 @@ func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 		if child.Type() != "import_statement" {
 			continue
 		}
-		switch child.ChildCount() {
+		switch child.NamedChildCount() {
 		case 3:
 			maj, min := extractVersionNumber(child.Child(2), b)
 			d = append(d, ASTImport{
