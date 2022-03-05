@@ -72,6 +72,13 @@ QJsonObject Handle::dispatch(QJsonObject req)
             handles << handle.toInt();
         }
         dbgClient->lookup(handles, req["include-source"].toBool());
+        return OK;
+    } else if (req["method"] == "set-breakpoint") {
+        dbgClient->setBreakpoint(req["file"].toString(), req["line"].toInt());
+        return OK;
+    } else if (req["method"] == "set-breakpoint-enabled") {
+        dbgClient->changeBreakpoint(req["number"].toInt(), req["enabled"].toBool());
+        return OK;
     }
 
     return NOT_FOUND;

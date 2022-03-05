@@ -20,10 +20,12 @@ type Handle struct {
 	Callback func(i json.RawMessage)
 	self     unsafe.Pointer
 
-	evaluate   chan json.RawMessage
-	stackTrace chan json.RawMessage
-	scope      chan json.RawMessage
-	lookup     chan json.RawMessage
+	evaluate         chan json.RawMessage
+	stackTrace       chan json.RawMessage
+	scope            chan json.RawMessage
+	lookup           chan json.RawMessage
+	setBreakpoint    chan json.RawMessage
+	changeBreakpoint chan json.RawMessage
 }
 
 //export goCallback
@@ -39,6 +41,8 @@ func New() *Handle {
 	h.stackTrace = make(chan json.RawMessage)
 	h.scope = make(chan json.RawMessage)
 	h.lookup = make(chan json.RawMessage)
+	h.setBreakpoint = make(chan json.RawMessage)
+	h.changeBreakpoint = make(chan json.RawMessage)
 	return h
 }
 func (h *Handle) callback(s *C.char) {
@@ -64,6 +68,10 @@ func (h *Handle) callback(s *C.char) {
 			h.scope <- r
 		} else if m["command"] == "lookup" {
 			h.lookup <- r
+		} else if m["command"] == "setbreakpoint" {
+			h.setBreakpoint <- r
+		} else if m["command"] == "changebreakpoint" {
+			h.changeBreakpoint <- r
 		}
 	} else if m["signal"] == "v4-failure" {
 		if m["command"] == "evaluate" {
@@ -74,6 +82,10 @@ func (h *Handle) callback(s *C.char) {
 			h.scope <- r
 		} else if m["command"] == "lookup" {
 			h.lookup <- r
+		} else if m["command"] == "setbreakpoint" {
+			h.setBreakpoint <- r
+		} else if m["command"] == "changebreakpoint" {
+			h.changeBreakpoint <- r
 		}
 	}
 

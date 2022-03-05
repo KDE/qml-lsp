@@ -52,6 +52,46 @@ func (h *Handle) Evaluate(s string) (ret QMLValue, err error, okay bool) {
 	return m.Body, nil, true
 }
 
+func (h *Handle) SetBreakpointEnabled(num int, enabled bool) (ChangeBreakpointResponse, error) {
+	h.invoke(obj{
+		"method":  "set-breakpoint-enabled",
+		"number":  num,
+		"enabled": enabled,
+	})
+
+	msg := <-h.changeBreakpoint
+
+	var m struct {
+		Body ChangeBreakpointResponse `json:"body"`
+	}
+	feh := json.Unmarshal(msg, &m)
+	if feh != nil {
+		return ChangeBreakpointResponse{}, fmt.Errorf("failed to decode breakpoint response: %+w", feh)
+	}
+
+	return m.Body, nil
+}
+
+func (h *Handle) SetBreakpoint(file string, line int) (SetBreakpointResponse, error) {
+	h.invoke(obj{
+		"method": "set-breakpoint",
+		"file":   file,
+		"line":   line,
+	})
+
+	msg := <-h.setBreakpoint
+
+	var m struct {
+		Body SetBreakpointResponse `json:"body"`
+	}
+	feh := json.Unmarshal(msg, &m)
+	if feh != nil {
+		return SetBreakpointResponse{}, fmt.Errorf("failed to decode breakpoint response: %+w", feh)
+	}
+
+	return m.Body, nil
+}
+
 func (h *Handle) Lookup(includeSource bool, handles ...int) (LookupResponse, error) {
 	h.invoke(obj{
 		"method":         "lookup",

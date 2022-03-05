@@ -41,6 +41,16 @@ type ScopeBody struct {
 	Type       int      `json:"type"`
 }
 
+type SetBreakpointResponse struct {
+	ID   int    `json:"breakpoint"`
+	Type string `json:"type"`
+}
+
+type ChangeBreakpointResponse struct {
+	ID   int    `json:"breakpoint"`
+	Type string `json:"type"`
+}
+
 type LookupResponse struct {
 	Body    map[string]QMLValue `json:"body"`
 	Command string              `json:"command"`
