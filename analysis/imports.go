@@ -62,13 +62,11 @@ func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 			var uri string
 			var as string
 
-			switch child.NamedChildCount() {
-			case 2:
-				as = child.NamedChild(1).NamedChild(0).Content(b)
-				fallthrough
-			case 1:
-				uri = child.NamedChild(0).Content(b)
-				uri = uri[1 : len(uri)-1]
+			uri = child.ChildByFieldName("uri").Content(b)
+			uri = uri[1 : len(uri)-1]
+
+			if field := child.ChildByFieldName("alias"); field != nil {
+				as = field.Content(b)
 			}
 
 			u = append(u, URIImport{
@@ -81,25 +79,19 @@ func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 		if child.Type() != "import_statement" {
 			continue
 		}
-		switch child.NamedChildCount() {
-		case 2:
-			maj, min := extractVersionNumber(child.NamedChild(1), b)
-			d = append(d, ASTImport{
-				Module:     ExtractQualifiedIdentifier(child.NamedChild(0), b),
-				MajVersion: maj,
-				MinVersion: min,
-				Range:      FromNode(child),
-			})
-		case 3:
-			maj, min := extractVersionNumber(child.NamedChild(1), b)
-			d = append(d, ASTImport{
-				Module:     ExtractQualifiedIdentifier(child.NamedChild(0), b),
-				MajVersion: maj,
-				MinVersion: min,
-				As:         child.NamedChild(2).NamedChild(0).Content(b),
-				Range:      FromNode(child),
-			})
+
+		maj, min := extractVersionNumber(child.ChildByFieldName("number"), b)
+		import_ := ASTImport{
+			Module:     ExtractQualifiedIdentifier(child.ChildByFieldName("uri"), b),
+			MajVersion: maj,
+			MinVersion: min,
+			Range:      FromNode(child),
 		}
+		if alias := child.ChildByFieldName("alias"); alias != nil {
+			import_.As = alias.ChildByFieldName("aliasName").Content(b)
+		}
+
+		d = append(d, import_)
 	}
 	return d, u
 }
