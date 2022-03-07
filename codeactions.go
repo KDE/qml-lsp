@@ -49,8 +49,8 @@ func standalonify(code string) string {
 	lines := strings.Split(code, "\n")
 	lines = lines[1:]
 
-	spaces := math.MaxInt
-	tabs := math.MaxInt
+	spaces := math.MaxInt32
+	tabs := math.MaxInt32
 
 	for _, line := range lines {
 		spaces = Min(spaces, leadingSpaces(line))

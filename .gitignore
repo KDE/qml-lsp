@@ -1,3 +1,5 @@
 /qml-lsp
 /qml-lsp-static
 /qml-dbg
+/qml-lint-static
+/qml-refactor-fairy-static
