@@ -1,3 +1,5 @@
+import QtQuick 2.12
+import QtQuick.Controls 2.12 as QQC2
 import org.kde.kirigami 2.12 as Kirigami
 
 Kirigami.Heading {
@@ -22,6 +24,16 @@ Kirigami.Heading {
     namako: Kirigami.AboutPage {
         namako: {
             let telo = 1
+            telo.wawa = "a"
+            let b = telo
+        }
+    }
+
+    Text {
+        text: "namako"
+        telo: {
+            let k = text
+            let u = kili
         }
     }
 }

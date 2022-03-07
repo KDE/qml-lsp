@@ -49,7 +49,18 @@ type FileTree struct {
 }
 
 type NodeData struct {
+	IsStrongScope bool
+	IsWeakScope   bool
+	Types         map[string]TypeURI
 }
+
+type TypeURI struct {
+	Path         string
+	MajorVersion int
+	Name         string
+}
+
+var NumberURI = TypeURI{"", 0, "number"}
 
 type resultSting struct {
 	s string

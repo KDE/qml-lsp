@@ -19,6 +19,9 @@ type Queries struct {
 	CoercingInequality                      *sitter.Query
 	AssignmentInCondition                   *sitter.Query
 	JSInsideQML                             *sitter.Query
+	Identifier                              *sitter.Query
+	StrongScopes                            *sitter.Query
+	ObjectDeclarations                      *sitter.Query
 }
 
 func (q *Queries) Init() error {
@@ -28,6 +31,10 @@ func (q *Queries) Init() error {
 		return err
 	}
 	q.ObjectDeclarationTypes, err = sitter.NewQuery([]byte("(object_declaration (qualified_identifier) @ident)"), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.ObjectDeclarations, err = sitter.NewQuery([]byte("(object_declaration) @ident"), qml.GetLanguage())
 	if err != nil {
 		return err
 	}
@@ -102,9 +109,26 @@ func (q *Queries) Init() error {
 	}
 	q.JSInsideQML, err = sitter.NewQuery([]byte(`
 [
-	(normal_property value: (_) @value )
-	(readonly_property value: (_) @value )
-	(property_set value: (_) @value )
+	(normal_property value: [(expression) (script_statement)] @value )
+	(readonly_property value: [(expression) (script_statement)] @value )
+	(property_set value: [(expression) (script_statement)] @value )
+]
+`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.Identifier, err = sitter.NewQuery([]byte(`
+(identifier) @identifier
+`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.StrongScopes, err = sitter.NewQuery([]byte(`
+[
+	(statement_block) @scope
+	(script_statement) @scope
+	(program) @scope
+	(inline_type_declaration) @scope
 ]
 `), qml.GetLanguage())
 	if err != nil {
