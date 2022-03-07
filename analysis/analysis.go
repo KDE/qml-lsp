@@ -40,7 +40,15 @@ func (i ImportData) ToSourceString() string {
 type FileContext struct {
 	Imports []ImportData
 	Body    []byte
-	Tree    *sitter.Tree
+	Tree    FileTree
+}
+
+type FileTree struct {
+	*sitter.Tree
+	Data map[*sitter.Node]NodeData
+}
+
+type NodeData struct {
 }
 
 type resultSting struct {
@@ -115,7 +123,7 @@ func (s *AnalysisEngine) SetFileContext(uri string, content []byte) error {
 	fctx := FileContext{}
 
 	it := QmlParser()
-	fctx.Tree = it.Parse(nil, content)
+	fctx.Tree = FileTree{it.Parse(nil, content), map[*sitter.Node]NodeData{}}
 	fctx.Body = content
 
 	importData, relativeData := ExtractImports(fctx.Tree.RootNode(), content)
@@ -146,6 +154,8 @@ func (s *AnalysisEngine) SetFileContext(uri string, content []byte) error {
 			Range:  it.Range,
 		})
 	}
+
+	s.analyseFile(uri, &fctx)
 
 	s.fileContexts[uri] = fctx
 

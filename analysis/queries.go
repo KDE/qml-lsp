@@ -18,6 +18,7 @@ type Queries struct {
 	CoercingEquality                        *sitter.Query
 	CoercingInequality                      *sitter.Query
 	AssignmentInCondition                   *sitter.Query
+	JSInsideQML                             *sitter.Query
 }
 
 func (q *Queries) Init() error {
@@ -96,6 +97,16 @@ func (q *Queries) Init() error {
 
 ))
 	`), qml.GetLanguage())
+	if err != nil {
+		return err
+	}
+	q.JSInsideQML, err = sitter.NewQuery([]byte(`
+[
+	(normal_property value: (_) @value )
+	(readonly_property value: (_) @value )
+	(property_set value: (_) @value )
+]
+`), qml.GetLanguage())
 	if err != nil {
 		return err
 	}
