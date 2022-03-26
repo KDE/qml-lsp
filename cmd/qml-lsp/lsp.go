@@ -16,13 +16,16 @@ import (
 )
 
 type server struct {
-	rootURI  string
-	analysis *analysis.AnalysisEngine
+	rootURI              string
+	analysis             *analysis.AnalysisEngine
+	possibleImports      []analysis.ImportRelAndMaj
+	possibleImportMinors map[analysis.ImportRelAndMaj]int
 }
 
 func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.InitializeParams) (*lsp.InitializeResult, *lsp.InitializeError) {
 	s.rootURI = string(params.RootURI)
 	s.analysis = analysis.New(qtquick.BuiltinModule())
+	s.possibleImports, s.possibleImportMinors = analysis.PossibleImports()
 
 	return &lsp.InitializeResult{
 		Capabilities: lsp.ServerCapabilities{
@@ -108,8 +111,6 @@ func (s *server) SemanticTokensFull(ctx context.Context, conn jsonrpc2.JSONRPC2,
 		line := n.StartPoint().Row
 		startChar := n.StartPoint().Column
 		length := n.EndByte() - n.StartByte()
-
-		println("adding for", n.Type(), n.Content(fctx.Body), "\t", line, startChar, length)
 
 		deltaLine := line - uint32(previousLine)
 		var deltaStart uint32
@@ -400,52 +401,44 @@ type CodeAction struct {
 	Data interface{} `json:"data"`
 }
 
-func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams) (*lsp.CompletionList, error) {
+func (s *server) completeComponentContext(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams, word string, node *sitter.Node) (*lsp.CompletionList, error) {
 	uri := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
 	fctx, _ := s.analysis.GetFileContext(uri)
 	document := string(fctx.Body)
 
-	idx := posToIdx(document, params.Position)
-	if idx == -1 {
-		return &lsp.CompletionList{IsIncomplete: false}, nil
-	}
-
-	w := wordAtPos(document, idx)
-	m := findNearestMatchingNode(fctx.Tree.RootNode(), params.Position)
-	enclosing := locateEnclosingComponent(m, []byte(document))
+	enclosing := locateEnclosingComponent(node, []byte(document))
 
 	citems := []lsp.CompletionItem{}
-	println(w)
 
 	doComponents := func(prefix string, components []analysis.Component) {
 		for _, component := range components {
-			if strings.HasPrefix(prefix+component.SaneName(), w) {
+			if strings.HasPrefix(prefix+component.SaneName(), word) {
 				citems = append(citems, lsp.CompletionItem{
 					Label:      prefix + component.SaneName(),
 					Kind:       lsp.ClassCompletion,
-					InsertText: strings.TrimPrefix(prefix+component.SaneName(), w),
+					InsertText: strings.TrimPrefix(prefix+component.SaneName(), word),
 				})
 			}
 			if prefix+component.SaneName() == enclosing {
 				for _, prop := range component.Properties {
-					if strings.HasPrefix(prop.Name, w) {
+					if strings.HasPrefix(prop.Name, word) {
 						citems = append(citems, lsp.CompletionItem{
 							Label:      prop.Name,
 							Kind:       lsp.PropertyCompletion,
 							Detail:     prop.Type,
-							InsertText: strings.TrimPrefix(prop.Name, w),
+							InsertText: strings.TrimPrefix(prop.Name, word),
 						})
 					}
 				}
 			}
 			for _, enum := range component.Enums {
 				for mem := range enum.Values {
-					if strings.HasPrefix(prefix+component.SaneName()+"."+mem, w) {
+					if strings.HasPrefix(prefix+component.SaneName()+"."+mem, word) {
 						citems = append(citems, lsp.CompletionItem{
 							Label:      prefix + component.SaneName() + "." + mem,
 							Kind:       lsp.EnumMemberCompletion,
 							Detail:     prefix + component.SaneName() + "." + enum.Name,
-							InsertText: strings.TrimPrefix(prefix+component.SaneName()+"."+mem, w),
+							InsertText: strings.TrimPrefix(prefix+component.SaneName()+"."+mem, word),
 						})
 					}
 				}
@@ -460,8 +453,7 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 
 				for _, prop := range comp.Properties {
 					fullName := prefix + component.SaneName() + "." + prop.Name
-					println(fullName, w)
-					if !strings.HasPrefix(fullName, w) {
+					if !strings.HasPrefix(fullName, word) {
 						continue
 					}
 
@@ -469,7 +461,7 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 						Label:      fullName,
 						Kind:       lsp.PropertyCompletion,
 						Detail:     fmt.Sprintf("attached %s", prefix+component.SaneName()),
-						InsertText: strings.TrimPrefix(fullName+": ", w),
+						InsertText: strings.TrimPrefix(fullName+": ", word),
 					})
 				}
 			}
@@ -487,4 +479,65 @@ func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 	}
 
 	return &lsp.CompletionList{IsIncomplete: false, Items: citems}, nil
+}
+
+func (s *server) completeProgramContext(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams, word string, node *sitter.Node) (*lsp.CompletionList, error) {
+	citems := []lsp.CompletionItem{}
+
+	for _, impt := range s.possibleImports {
+		if strings.HasPrefix(impt.URL, word) {
+			rest := fmt.Sprintf("%s %d.%d", impt.URL, impt.Major, s.possibleImportMinors[impt])
+			citems = append(citems, lsp.CompletionItem{
+				Label:      rest,
+				Kind:       lsp.ModuleCompletion,
+				InsertText: strings.TrimPrefix(rest, word),
+			})
+		}
+	}
+
+	return &lsp.CompletionList{IsIncomplete: false, Items: citems}, nil
+}
+
+type cursorContext int
+
+const (
+	program cursorContext = iota
+	objectBlock
+)
+
+func classifyNodeContext(n *sitter.Node) cursorContext {
+	switch n.Type() {
+	case "program":
+		return program
+	case "object_block":
+		return objectBlock
+	default:
+		if n.Parent() == nil {
+			panic("unreachable")
+		}
+		return classifyNodeContext(n.Parent())
+	}
+}
+
+func (s *server) Completion(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.CompletionParams) (*lsp.CompletionList, error) {
+	uri := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
+	fctx, _ := s.analysis.GetFileContext(uri)
+	document := string(fctx.Body)
+
+	idx := posToIdx(document, params.Position)
+	if idx == -1 {
+		return &lsp.CompletionList{IsIncomplete: false}, nil
+	}
+
+	w := wordAtPos(document, idx)
+	m := findNearestMatchingNode(fctx.Tree.RootNode(), params.Position)
+
+	switch classifyNodeContext(m) {
+	case program:
+		return s.completeProgramContext(ctx, conn, params, w, m)
+	case objectBlock:
+		return s.completeComponentContext(ctx, conn, params, w, m)
+	default:
+		return &lsp.CompletionList{IsIncomplete: false, Items: []lsp.CompletionItem{}}, nil
+	}
 }

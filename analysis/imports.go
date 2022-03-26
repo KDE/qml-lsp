@@ -46,6 +46,9 @@ func mustInt(s string) int {
 }
 
 func extractVersionNumber(node *sitter.Node, b []byte) (int, int) {
+	if node == nil {
+		return -1, -1
+	}
 	it := strings.Split(node.Content(b), ".")
 	return mustInt(it[0]), mustInt(it[1])
 }
@@ -81,6 +84,9 @@ func ExtractImports(root *sitter.Node, b []byte) ([]ASTImport, []URIImport) {
 		}
 
 		maj, min := extractVersionNumber(child.ChildByFieldName("number"), b)
+		if maj == -1 || min == -1 {
+			continue
+		}
 		import_ := ASTImport{
 			Module:     ExtractQualifiedIdentifier(child.ChildByFieldName("uri"), b),
 			MajVersion: maj,
