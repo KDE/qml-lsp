@@ -7,7 +7,7 @@ export GOARCH=amd64
 export CC=$(which musl-gcc)
 
 echo "Building qml-lsp..."
-go build --ldflags '-linkmode external -extldflags "-static"' -o qml-lsp-static
+go build --ldflags '-linkmode external -extldflags "-static"' -o qml-lsp-static ./cmd/qml-lsp
 
 echo "Building qml-lint..."
 go build --ldflags '-linkmode external -extldflags "-static"' -o qml-lint-static ./cmd/qml-lint
