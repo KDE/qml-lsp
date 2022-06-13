@@ -45,7 +45,7 @@ func Zu(fn interface{}) func(ctx context.Context, conn jsonrpc2.JSONRPC2, params
 			if !ret[1].IsNil() {
 				return ret[1].Interface()
 			}
-			panic("e")
+			return nil
 		default:
 			panic("unknown arity of return")
 		}

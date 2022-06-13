@@ -40,6 +40,7 @@ func (s *server) Initialize(ctx context.Context, conn jsonrpc2.JSONRPC2, params 
 			CompletionProvider: lsp.CompletionOptions{
 				TriggerCharacters: []string{"."},
 			},
+			HoverProvider: true,
 			SemanticTokensProvider: lsp.SemanticTokensOptions{
 				Legend: lsp.SemanticTokensLegend{
 					TokenTypes: []string{
@@ -91,6 +92,26 @@ func traverseTree(n *sitter.Node, f func(*sitter.Node)) {
 	for i := 0; i < int(n.ChildCount()); i++ {
 		traverseTree(n.Child(i), f)
 	}
+}
+
+func (s *server) Hover(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.HoverParams) (*lsp.Hover, error) {
+	fileURI := strings.TrimPrefix(string(params.TextDocument.URI), s.rootURI)
+	fctx, err := s.analysis.GetFileContext(fileURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file URI for hover: %+w", err)
+	}
+
+	m := findNearestMatchingNode(fctx.Tree.RootNode(), params.Position)
+	if v := fctx.Tree.Data[m].Kind; v != (analysis.TypeURI{}) {
+		return &lsp.Hover{
+			Contents: lsp.MarkupContent{
+				Kind:  lsp.PlainText,
+				Value: v.String(),
+			},
+		}, nil
+	}
+
+	return nil, nil
 }
 
 func (s *server) SemanticTokensFull(ctx context.Context, conn jsonrpc2.JSONRPC2, params lsp.SemanticTokensParams) (*lsp.SemanticTokens, error) {

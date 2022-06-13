@@ -45,16 +45,54 @@ func (s *AnalysisEngine) setEnvWeak(fctx *FileContext, node *sitter.Node, name s
 	panic("couldn't set a weak env")
 }
 
-func (s *AnalysisEngine) typeOfExpression(uri string, fctx *FileContext, node *sitter.Node) (TypeURI, error) {
+func (s *AnalysisEngine) typeOfExpression(uri string, fctx *FileContext, node *sitter.Node) (turi TypeURI, terr error) {
+	defer func() {
+		if terr == nil {
+			v := fctx.Tree.Data[node]
+			v.Kind = turi
+			fctx.Tree.Data[node] = v
+		}
+	}()
+	if v := fctx.Tree.Data[node].Kind; v != (TypeURI{}) {
+		return v, nil
+	}
 	switch node.Type() {
 	case "number":
 		return NumberURI, nil
+	case "string":
+		return StringURI, nil
+	case "true":
+		return BooleanURI, nil
+	case "false":
+		return BooleanURI, nil
 	case "identifier":
 		var_, found := s.lookupEnv(fctx, node, node.Content(fctx.Body))
 		if !found {
 			return TypeURI{}, fmt.Errorf("variable %s not found", node.Content(fctx.Body))
 		}
 		return var_, nil
+	case "ternary_expression":
+		mid, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("condition"))
+		if err != nil {
+			return TypeURI{}, fmt.Errorf("failed to type ternary because of an error in the condition: %w", err)
+		}
+		lhs, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("consequence"))
+		if err != nil {
+			return TypeURI{}, fmt.Errorf("failed to type ternary because of an error in the left-hand side: %w", err)
+		}
+		rhs, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("alternative"))
+		if err != nil {
+			return TypeURI{}, fmt.Errorf("failed to type ternary because of an error in the right-hand side: %w", err)
+		}
+		if mid != BooleanURI {
+			// TODO: flag an error
+		}
+		if lhs != rhs {
+			// TODO: flag an error
+		}
+		return lhs, nil
+	case "parenthesized_expression":
+		return s.typeOfExpression(uri, fctx, node.Child(1))
 	default:
 		return TypeURI{}, errors.New("typing this expression isn't implemented yet: " + node.Type())
 	}
@@ -83,6 +121,13 @@ func (s *AnalysisEngine) typeVariablesInner(uri string, fctx *FileContext, node 
 
 			s.setEnv(fctx, node, name, k)
 		}
+		identNode := match.Captures[0].Node
+		data := fctx.Tree.Data[identNode]
+		var_, found := s.lookupEnv(fctx, identNode, identNode.Content(fctx.Body))
+		if found {
+			data.Kind = var_
+		}
+		fctx.Tree.Data[identNode] = data
 	}
 }
 
@@ -138,6 +183,7 @@ func (s *AnalysisEngine) typeObjects(uri string, fctx *FileContext) {
 								Path:         "",
 								MajorVersion: 0,
 								Name:         prop.Type,
+								ReactiveList: prop.IsList,
 							})
 						}
 					}

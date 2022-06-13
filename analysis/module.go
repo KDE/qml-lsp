@@ -53,6 +53,8 @@ type Enum struct {
 }
 
 type Property struct {
-	Name string `qml:"name"`
-	Type string `qml:"type"`
+	Name      string `qml:"name"`
+	Type      string `qml:"type"`
+	IsList    bool   `qml:"isList"`
+	IsPointer bool   `qml:"isPointer"`
 }

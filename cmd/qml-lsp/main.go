@@ -85,6 +85,7 @@ func StartServer() {
 		"textDocument/documentLink":        lspserver.Zu(s.DocumentLink),
 		"textDocument/codeLens":            lspserver.Zu(s.CodeLens),
 		"textDocument/semanticTokens/full": lspserver.Zu(s.SemanticTokensFull),
+		"textDocument/hover":               lspserver.Zu(s.Hover),
 	}
 	lspserver.StartServer(a)
 }

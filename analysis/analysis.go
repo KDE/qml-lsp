@@ -52,15 +52,35 @@ type NodeData struct {
 	IsStrongScope bool
 	IsWeakScope   bool
 	Types         map[string]TypeURI
+	Kind          TypeURI
 }
 
 type TypeURI struct {
 	Path         string
 	MajorVersion int
 	Name         string
+	ReactiveList bool
+	Pointer      bool
 }
 
-var NumberURI = TypeURI{"", 0, "number"}
+func (t *TypeURI) String() string {
+	v := ""
+	if t.Path == "" {
+		v = t.Name
+	} else {
+		v = fmt.Sprintf("%s/%d %s", t.Path, t.MajorVersion, t.Name)
+	}
+
+	if t.ReactiveList {
+		return fmt.Sprintf("list<%s> (reactive)", v)
+	} else {
+		return v
+	}
+}
+
+var NumberURI = TypeURI{"", 0, "number", false, false}
+var BooleanURI = TypeURI{"", 0, "bool", false, false}
+var StringURI = TypeURI{"", 0, "string", false, false}
 
 type resultSting struct {
 	s string
