@@ -6,6 +6,7 @@ require (
 	github.com/alecthomas/participle/v2 v2.0.0-alpha7
 	github.com/alecthomas/repr v0.0.0-20210801044451-80ca428c5142 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
+	github.com/goccy/go-graphviz v0.0.9 // indirect
 	github.com/google/go-dap v0.6.0
 	github.com/iafan/cwalk v0.0.0-20210125030640-586a8832a711 // indirect
 	github.com/mattn/go-pointer v0.0.1

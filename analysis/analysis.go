@@ -81,6 +81,7 @@ func (t *TypeURI) String() string {
 var NumberURI = TypeURI{"", 0, "number", false, false}
 var BooleanURI = TypeURI{"", 0, "bool", false, false}
 var StringURI = TypeURI{"", 0, "string", false, false}
+var ComplexURI = TypeURI{"", 0, "complexType", false, false}
 
 type resultSting struct {
 	s string

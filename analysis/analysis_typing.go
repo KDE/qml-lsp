@@ -3,6 +3,7 @@ package analysis
 import (
 	"errors"
 	"fmt"
+	"qml-lsp/analysis/cfg"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
@@ -45,7 +46,7 @@ func (s *AnalysisEngine) setEnvWeak(fctx *FileContext, node *sitter.Node, name s
 	panic("couldn't set a weak env")
 }
 
-func (s *AnalysisEngine) typeOfExpression(uri string, fctx *FileContext, node *sitter.Node) (turi TypeURI, terr error) {
+func (s *AnalysisEngine) typeOfExpression(uri string, fctx *FileContext, node *sitter.Node, edgeID cfg.EdgeID, facts *cfg.Facts) (turi TypeURI, terr error) {
 	defer func() {
 		if terr == nil {
 			v := fctx.Tree.Data[node]
@@ -72,15 +73,15 @@ func (s *AnalysisEngine) typeOfExpression(uri string, fctx *FileContext, node *s
 		}
 		return var_, nil
 	case "ternary_expression":
-		mid, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("condition"))
+		mid, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("condition"), edgeID, facts)
 		if err != nil {
 			return TypeURI{}, fmt.Errorf("failed to type ternary because of an error in the condition: %w", err)
 		}
-		lhs, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("consequence"))
+		lhs, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("consequence"), edgeID, facts)
 		if err != nil {
 			return TypeURI{}, fmt.Errorf("failed to type ternary because of an error in the left-hand side: %w", err)
 		}
-		rhs, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("alternative"))
+		rhs, err := s.typeOfExpression(uri, fctx, node.ChildByFieldName("alternative"), edgeID, facts)
 		if err != nil {
 			return TypeURI{}, fmt.Errorf("failed to type ternary because of an error in the right-hand side: %w", err)
 		}
@@ -92,9 +93,141 @@ func (s *AnalysisEngine) typeOfExpression(uri string, fctx *FileContext, node *s
 		}
 		return lhs, nil
 	case "parenthesized_expression":
-		return s.typeOfExpression(uri, fctx, node.Child(1))
+		return s.typeOfExpression(uri, fctx, node.Child(1), edgeID, facts)
+	case "assignment_expression":
+		// TODO: don't assume identifier
+		lhs := node.ChildByFieldName("left").Content(fctx.Body)
+		rhs := node.ChildByFieldName("right")
+
+		val, err := s.typeOfExpression(uri, fctx, rhs, edgeID, facts)
+		if err != nil {
+			return TypeURI{}, fmt.Errorf("failed to type assignment because of an error in the value: %w", err)
+		}
+
+		facts.Record(InitialisedFact{
+			ID:              facts.NextFactID(),
+			Variable:        lhs,
+			MustInitialised: true,
+		}, edgeID)
+		facts.Record(TypeFact{
+			ID:       facts.NextFactID(),
+			Variable: lhs,
+			Kind:     val,
+			MustType: true,
+		}, edgeID)
+
+		return val, nil
 	default:
 		return TypeURI{}, errors.New("typing this expression isn't implemented yet: " + node.Type())
+	}
+}
+
+type InitialisedFact struct {
+	ID              int
+	Variable        string
+	MustInitialised bool
+}
+
+func (t InitialisedFact) FactID() int {
+	return t.ID
+}
+
+func (t InitialisedFact) Must() bool {
+	return t.MustInitialised
+}
+
+func (t InitialisedFact) String() string {
+	if t.MustInitialised {
+		return fmt.Sprintf("%d: variable %s is initialised", t.ID, t.Variable)
+	} else {
+		return fmt.Sprintf("%d: variable %s could be initialised", t.ID, t.Variable)
+	}
+}
+
+func (t InitialisedFact) Hash() string {
+	return fmt.Sprintf("%s%t", t.Variable, t.MustInitialised)
+}
+
+type TypeFact struct {
+	ID       int
+	Variable string
+	Kind     TypeURI
+	MustType bool
+}
+
+func (t TypeFact) FactID() int {
+	return t.ID
+}
+
+func (t TypeFact) Must() bool {
+	return t.MustType
+}
+
+func (t TypeFact) Hash() string {
+	return fmt.Sprintf("%s%s%t", t.Variable, &t.Kind, t.MustType)
+}
+
+func (t TypeFact) String() string {
+	if t.MustType {
+		return fmt.Sprintf("%d: variable %s is %s", t.ID, t.Variable, &t.Kind)
+	} else {
+		return fmt.Sprintf("%d: variable %s could be %s", t.ID, t.Variable, &t.Kind)
+	}
+}
+
+func (s *AnalysisEngine) traverseGraph(uri string, fctx *FileContext, nodeID cfg.NodeID, edgeID cfg.EdgeID, graph *cfg.Graph, facts *cfg.Facts) {
+	node := graph.NodeByID(nodeID)
+
+	return
+
+	switch node.Type {
+	case cfg.BodyNode:
+		switch node.AST.Type() {
+		case "lexical_declaration":
+			for i := 0; i < int(node.AST.NamedChildCount()); i++ {
+				declarator := node.AST.NamedChild(i)
+				if declarator.Type() != "variable_declarator" {
+					continue
+				}
+				name := declarator.ChildByFieldName("name").Content(fctx.Body)
+				value := declarator.ChildByFieldName("value")
+				if value == nil {
+					s.setEnv(fctx, declarator, name, ComplexURI)
+					continue
+				}
+				kind, err := s.typeOfExpression(uri, fctx, value, edgeID, facts)
+				if err != nil {
+					println("error during analysis: " + err.Error())
+				} else {
+					s.setEnv(fctx, declarator, name, kind)
+				}
+			}
+		case "expression_statement":
+			_, err := s.typeOfExpression(uri, fctx, node.AST.NamedChild(0), edgeID, facts)
+			if err != nil {
+				println("error during analysis: " + err.Error())
+			}
+		case "return_statement":
+			turi, err := s.typeOfExpression(uri, fctx, node.AST.NamedChild(0), edgeID, facts)
+			if err != nil {
+				println("error during analysis: " + err.Error())
+			}
+			_ = turi
+		default:
+			panic("unhandled body node type " + node.AST.Type())
+		}
+	case cfg.JoinNode:
+		incoming := graph.IncomingEdges(nodeID)
+		var factsfacts [][]cfg.Fact
+		for _, edge := range incoming {
+			factsfacts = append(factsfacts, facts.Facts[edge.ID])
+		}
+
+		// TODO: join these facts
+	}
+
+	for _, edge := range graph.OutgoingEdges(nodeID) {
+		s.traverseGraph(uri, fctx, edge.To, edge.ID, graph, facts)
 	}
 }
 
@@ -102,33 +235,45 @@ func (s *AnalysisEngine) typeVariablesInner(uri string, fctx *FileContext, node 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	qc.Exec(s.queries.Identifier, node)
-	for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
-		if match.Captures[0].Node.Parent().Type() == "variable_declarator" {
-			name := match.Captures[0].Node.Content(fctx.Body)
-			value := match.Captures[0].Node.Parent().ChildByFieldName("value")
-			if value == nil {
-				// TODO: flag an issue
-				continue
-			}
+	graph := cfg.From(node)
+	facts := cfg.NewFacts(graph)
 
-			k, err := s.typeOfExpression(uri, fctx, value)
-			if err != nil {
-				println(err.Error())
-				// TODO: flag an issue
-				continue
-			}
+	s.traverseGraph(uri, fctx, graph.StartNode(), 0, graph, facts)
 
-			s.setEnv(fctx, node, name, k)
+	for edge, facts := range facts.Facts {
+		println("facts for edge", edge)
+		for _, fact := range facts {
+			fmt.Printf("- %+v\n", fact)
 		}
-		identNode := match.Captures[0].Node
-		data := fctx.Tree.Data[identNode]
-		var_, found := s.lookupEnv(fctx, identNode, identNode.Content(fctx.Body))
-		if found {
-			data.Kind = var_
-		}
-		fctx.Tree.Data[identNode] = data
 	}
+
+	// qc.Exec(s.queries.Identifier, node)
+	// for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {
+	// 	if match.Captures[0].Node.Parent().Type() == "variable_declarator" {
+	// 		name := match.Captures[0].Node.Content(fctx.Body)
+	// 		value := match.Captures[0].Node.Parent().ChildByFieldName("value")
+	// 		if value == nil {
+	// 			// TODO: flag an issue
+	// 			continue
+	// 		}
+
+	// 		k, err := s.typeOfExpression(uri, fctx, value)
+	// 		if err != nil {
+	// 			println(err.Error())
+	// 			// TODO: flag an issue
+	// 			continue
+	// 		}
+
+	// 		s.setEnv(fctx, node, name, k)
+	// 	}
+	// 	identNode := match.Captures[0].Node
+	// 	data := fctx.Tree.Data[identNode]
+	// 	var_, found := s.lookupEnv(fctx, identNode, identNode.Content(fctx.Body))
+	// 	if found {
+	// 		data.Kind = var_
+	// 	}
+	// 	fctx.Tree.Data[identNode] = data
+	// }
 }
 
 func (s *AnalysisEngine) typeVariables(uri string, fctx *FileContext) {
