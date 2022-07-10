@@ -2,13 +2,9 @@ import QtQuick 2.15
 
 Item {
     property int gay: {
-        let a
-        while (true) {
-            if (a === undefined) {
-                a = 5
-            } else {
-                throw "a"
-            }
+        let a = null
+        while (a === null) {
+            a = 3
         }
         return a
     }

@@ -213,6 +213,12 @@ func (s *AnalysisEngine) traverseGraph(uri string, fctx *FileContext, nodeID cfg
 				println("error during analysis: " + err.Error())
 			}
 			_ = turi
+		case "throw_statement":
+			turi, err := s.typeOfExpression(uri, fctx, node.AST.NamedChild(0), edgeID, facts)
+			if err != nil {
+				println("error during analysis: " + err.Error())
+			}
+			_ = turi
 		default:
 			panic("unhandled body node type " + node.AST.Type())
 		}
@@ -223,6 +229,7 @@ func (s *AnalysisEngine) traverseGraph(uri string, fctx *FileContext, nodeID cfg
 			factsfacts = append(factsfacts, facts.Facts[edge.ID])
 		}
 
+		println("i need to join facts")
 		// TODO: join these facts
 	}
 
