@@ -29,6 +29,12 @@ func recurseCreateNodes(it flow.FlowNode, g *cgraph.Graph, visited map[int]bool,
 			panic(err)
 		}
 		e.SetLabel("Start")
+	case *flow.FlowUnreachable:
+		e, err := g.CreateNode(strconv.Itoa(k.ID))
+		if err != nil {
+			panic(err)
+		}
+		e.SetLabel("Unreachable")
 	case *flow.FlowJoin:
 		e, err := g.CreateNode(strconv.Itoa(k.ID))
 		if err != nil {
@@ -52,6 +58,8 @@ func recurseCreateNodes(it flow.FlowNode, g *cgraph.Graph, visited map[int]bool,
 		}
 		e.SetLabel(fmt.Sprintf("%s is %t", k.Node.Content(content), k.AssumeTrue))
 		recurseCreateNodes(k.Antecedent, g, visited, content)
+	default:
+		panic("unhandled node type")
 	}
 }
 
@@ -62,7 +70,7 @@ func recurseCreateEdges(it flow.FlowNode, g *cgraph.Graph, visited map[int]bool,
 	visited[it.GetID()] = true
 
 	switch k := it.(type) {
-	case *flow.FlowStart:
+	case *flow.FlowStart, *flow.FlowUnreachable:
 		// nothing
 	case *flow.FlowJoin:
 		for _, antecedent := range k.Antecedents {
@@ -111,6 +119,8 @@ func recurseCreateEdges(it flow.FlowNode, g *cgraph.Graph, visited map[int]bool,
 			to,
 		)
 		recurseCreateEdges(k.Antecedent, g, visited, content)
+	default:
+		panic("unhandled edge type")
 	}
 }
 
@@ -133,7 +143,7 @@ func flowToDot(builder *flow.Builder, node *sitter.Node, toWhere string, content
 		panic(err)
 	}
 	gnode.SetShape(cgraph.SquareShape)
-	gnode.SetLabel(Dedent(node.Content(content)))
+	gnode.SetLabel(Dedent(node.Content(content)) + "\n" + fmt.Sprintf("%d:%d", node.StartPoint().Row, node.StartPoint().Column))
 
 	visited := map[int]bool{}
 	recurseCreateNodes(builder.FlowNodes[node], graph, visited, content)

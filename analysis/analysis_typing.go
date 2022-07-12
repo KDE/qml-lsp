@@ -242,17 +242,17 @@ func (s *AnalysisEngine) typeVariablesInner(uri string, fctx *FileContext, node 
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	graph := cfg.From(node)
-	facts := cfg.NewFacts(graph)
+	// graph := cfg.From(node)
+	// facts := cfg.NewFacts(graph)
 
-	s.traverseGraph(uri, fctx, graph.StartNode(), 0, graph, facts)
+	// s.traverseGraph(uri, fctx, graph.StartNode(), 0, graph, facts)
 
-	for edge, facts := range facts.Facts {
-		println("facts for edge", edge)
-		for _, fact := range facts {
-			fmt.Printf("- %+v\n", fact)
-		}
-	}
+	// for edge, facts := range facts.Facts {
+	// 	println("facts for edge", edge)
+	// 	for _, fact := range facts {
+	// 		fmt.Printf("- %+v\n", fact)
+	// 	}
+	// }
 
 	// qc.Exec(s.queries.Identifier, node)
 	// for match, goNext := qc.NextMatch(); goNext; match, goNext = qc.NextMatch() {

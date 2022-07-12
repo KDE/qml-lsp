@@ -156,6 +156,10 @@ func (b *Builder) buildChildren(node *sitter.Node) {
 		b.buildLexicalDeclaration(node)
 	case "variable_declarator":
 		b.buildVariableDeclarator(node)
+	case "if_statement":
+		b.buildIfStatement(node)
+	case "break_statement", "continue_statement":
+		b.buildBreakOrContinueStatement(node)
 	default:
 		b.forEachBuild(node)
 	}
@@ -170,6 +174,50 @@ func (b *Builder) buildVariableDeclarator(node *sitter.Node) {
 	if value := node.ChildByFieldName("value"); value != nil {
 		b.currentFlow = b.newFlowAssignment(b.currentFlow, node)
 	}
+}
+
+func (b *Builder) buildBreakOrContinueStatement(node *sitter.Node) {
+	makeFlow := func(node *sitter.Node, breakTarget *FlowJoin, continueTarget *FlowJoin) {
+		label := (*FlowJoin)(nil)
+		if node.Type() == "break_statement" {
+			label = breakTarget
+		} else {
+			label = continueTarget
+		}
+		if label != nil {
+			label.addAntecedent(b.currentFlow)
+			b.currentFlow = b.newFlowUnreachable()
+		}
+	}
+	label := node.ChildByFieldName("label")
+	if label != nil {
+		b.Build(label)
+
+		panic("flow for label not supported")
+	} else {
+		makeFlow(node, b.breakTarget, b.continueTarget)
+	}
+}
+
+func (b *Builder) buildIfStatement(node *sitter.Node) {
+	postIf := b.newFlowJoin()
+
+	b.Build(node.ChildByFieldName("condition"))
+
+	postConditionFlow := b.currentFlow
+	b.currentFlow = b.newFlowCondition(b.currentFlow, node.ChildByFieldName("condition"), true)
+
+	b.Build(node.ChildByFieldName("consequence"))
+	postIf.addAntecedent(b.currentFlow)
+
+	b.currentFlow = b.newFlowCondition(postConditionFlow, node.ChildByFieldName("condition"), false)
+
+	if alternative := node.ChildByFieldName("alternative"); alternative != nil {
+		b.Build(alternative)
+	}
+
+	postIf.addAntecedent(b.currentFlow)
+	b.currentFlow = b.finishFlow(postIf)
 }
 
 func (b *Builder) buildWhileStatement(node *sitter.Node) {
